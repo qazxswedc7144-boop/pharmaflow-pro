@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => {
                 if (id.includes('tesseract.js')) {
                   return 'vendor-ocr';
                 }
-                if (id.includes('xlsx') || id.includes('jszip')) {
+                if (id.includes('read-excel-file') || id.includes('jszip')) {
                   return 'vendor-excel';
                 }
                 if (id.includes('recharts') || id.includes('d3') || id.includes('chart.js') || id.includes('react-chartjs-2')) {

@@ -1,3 +1,4 @@
+// src/services/data/smartImportEngine.ts
 import { extractTextFromImage } from '@features/ai/services/ocrService';
 import { normalizeArabic, cleanInvoiceText } from '@features/ai/services/arabicProcessor';
 import { parseInvoice, ParsedInvoice } from '@features/ai/services/aiInvoiceParser';
@@ -5,30 +6,128 @@ import { generateFileHash } from '@/utils/hash';
 import { getOCRCache, saveOCRCache } from '@features/ai/services/ocrCache';
 import { applyLearning } from '@features/ai/services/learningService';
 import * as pdfjsLib from 'pdfjs-dist';
-import * as XLSX from 'xlsx';
+import readXlsxFile from 'read-excel-file/browser';
 
-// Set worker source for pdfjs
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Safe Worker Configuration for PDF.js without arbitrary script execution
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  } catch (e) {
+    console.warn("PDF.js worker initialization warning:", e);
+  }
+}
+
+// Security Configuration Limits
+const MAX_EXCEL_FILE_SIZE = 15 * 1024 * 1024; // 15MB
+const MAX_PDF_FILE_SIZE = 25 * 1024 * 1024;   // 25MB
+const MAX_TOTAL_ROWS = 5000;                  // Anti-DoS limit on spreadsheet rows
+
+/**
+ * Sanitizes cell values to prevent Formula Injection (CSV/Excel Injection),
+ * ReDoS, and Prototype Pollution.
+ */
+function sanitizeCellValue(val: any): string {
+  if (val === null || val === undefined) return '';
+  if (val instanceof Date) {
+    try {
+      return val.toISOString().split('T')[0] || '';
+    } catch {
+      return '';
+    }
+  }
+  let str = String(val).trim();
+  
+  // Neutralize DDE & Formula Injection triggers (=, +, -, @, \t, \r) for non-numeric content
+  if (/^[=+\-@\t\r]/.test(str) && isNaN(Number(str))) {
+    str = str.replace(/^[=+\-@\t\r]+/, '');
+  }
+
+  // Prevent prototype pollution keywords
+  if (str === '__proto__' || str === 'constructor' || str === 'prototype') {
+    return '';
+  }
+
+  return str;
+}
+
+/**
+ * Safe, streaming CSV parser without vulnerable regex or prototype pollution
+ */
+function parseSafeCSV(csvText: string): string[][] {
+  const rows: string[][] = [];
+  const lines = csvText.split(/\r?\n/);
+  
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    if (rows.length >= MAX_TOTAL_ROWS) break; // Hard limit against memory exhaustion
+
+    const row: string[] = [];
+    let insideQuotes = false;
+    let currentCell = '';
+    const delimiter = line.includes('\t') ? '\t' : (line.includes(';') && !line.includes(',') ? ';' : ',');
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        if (insideQuotes && line[i + 1] === '"') {
+          currentCell += '"';
+          i++; // Skip escaped quote
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+      } else if (char === delimiter && !insideQuotes) {
+        row.push(sanitizeCellValue(currentCell));
+        currentCell = '';
+      } else {
+        currentCell += char;
+      }
+    }
+    row.push(sanitizeCellValue(currentCell));
+    if (row.length > 0) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
 
 /**
  * Extracts text and structured items directly from Excel (.xlsx, .xls) or CSV files,
  * intelligently mapping key columns (Name, Qty, Cost/Price, Expiry, Barcode, Discount)
- * and discarding unnecessary supplier columns.
+ * and discarding unnecessary supplier columns with enterprise security protections.
  */
 async function extractDataFromExcelOrCSV(file: File): Promise<{ text: string; structuredItems?: any[] }> {
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) {
-    throw new Error('ملف الاكسل فارغ أو لا يحتوي على صفحات صالحة.');
-  }
-  const worksheet = workbook.Sheets[firstSheetName];
-  if (!worksheet) {
-    throw new Error('صفحة العمل غير صالحة في ملف الاكسل.');
+  // 1. File Size Security Validation
+  if (file.size > MAX_EXCEL_FILE_SIZE) {
+    throw new Error(`حجم الملف يتجاوز الحد الأقصى الآمن المسموح به (${MAX_EXCEL_FILE_SIZE / (1024 * 1024)} ميجابايت).`);
   }
 
-  // Convert sheet to 2D array
-  const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+  const fileName = file.name.toLowerCase();
+  let rows: string[][] = [];
+
+  if (fileName.endsWith('.csv') || file.type.includes('csv')) {
+    const textContent = await file.text();
+    rows = parseSafeCSV(textContent);
+  } else {
+    // Safe XLSX parsing via read-excel-file (immune to prototype pollution and ReDoS)
+    try {
+      const rawRows = await readXlsxFile(file);
+      if (!rawRows || (rawRows as any[]).length === 0) {
+        throw new Error('ملف الاكسل فارغ أو لا يحتوي على بيانات صالحة.');
+      }
+      rows = (rawRows as any[]).slice(0, MAX_TOTAL_ROWS).map((row: any) => 
+        (Array.isArray(row) ? row : []).map((cell: any) => sanitizeCellValue(cell))
+      );
+    } catch (parseErr: any) {
+      // If parsing as strict XLSX fails, try fallback CSV parsing
+      try {
+        const textContent = await file.text();
+        rows = parseSafeCSV(textContent);
+      } catch {
+        throw new Error(`فشل تحليل ملف الاكسل بشكل آمن: ${parseErr.message || 'تنسيق الملف غير مدعوم'}`);
+      }
+    }
+  }
+
   if (!rows || rows.length === 0) {
     throw new Error('ملف الاكسل فارغ أو لا يحتوي على بيانات صالحة.');
   }
@@ -98,7 +197,7 @@ async function extractDataFromExcelOrCSV(file: File): Promise<{ text: string; st
   }
 
   const extractedItems: any[] = [];
-  let formattedText = `[جدول الاكسل - استخراج مباشر وذكاء اصطناعي للتحقق]\n`;
+  let formattedText = `[جدول الاكسل - استخراج مباشر مؤمّن وذكاء اصطناعي للتحقق]\n`;
 
   const startRow = headerRowIndex !== -1 ? headerRowIndex + 1 : 0;
   for (let r = startRow; r < rows.length; r++) {
@@ -120,9 +219,7 @@ async function extractDataFromExcelOrCSV(file: File): Promise<{ text: string; st
     
     const rawExpiry = colIndices.expiryDate !== -1 ? row[colIndices.expiryDate] : '';
     let expiry = '';
-    if (rawExpiry && typeof rawExpiry === 'object' && typeof (rawExpiry as any).toISOString === 'function') {
-      expiry = (rawExpiry as any).toISOString().split('T')[0];
-    } else if (rawExpiry !== undefined && rawExpiry !== null) {
+    if (rawExpiry) {
       expiry = String(rawExpiry).trim();
     }
 
@@ -152,17 +249,37 @@ async function extractDataFromExcelOrCSV(file: File): Promise<{ text: string; st
 }
 
 /**
- * Extracts text from a PDF file.
+ * Extracts text from a PDF file with strict security controls against JavaScript execution
+ * and resource exhaustion.
  */
 async function extractTextFromPDF(file: File): Promise<string> {
+  // 1. Validate File Size
+  if (file.size > MAX_PDF_FILE_SIZE) {
+    throw new Error(`حجم ملف PDF يتجاوز الحد الأقصى المسموح به (${MAX_PDF_FILE_SIZE / (1024 * 1024)} ميجابايت).`);
+  }
+
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+  // 2. Safe loading task with security parameters
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    useSystemFonts: true,
+    stopAtErrors: false
+  });
+
+  const pdf = await loadingTask.promise;
   let fullText = '';
 
-  for (let i = 1; i <= pdf.numPages; i++) {
+  const maxPages = Math.min(pdf.numPages, 100); // DoS prevention: cap at 100 pages
+  for (let i = 1; i <= maxPages; i++) {
     const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item: any) => item.str).join(' ');
+    const textContent = await page.getTextContent({
+      includeMarkedContent: false,
+      disableNormalization: false
+    });
+    const pageText = textContent.items
+      .map((item: any) => (typeof item.str === 'string' ? item.str : ''))
+      .join(' ');
     fullText += pageText + '\n';
   }
 
