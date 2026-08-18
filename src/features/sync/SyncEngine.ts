@@ -1,6 +1,14 @@
-import { db } from "@/core/db";
+// ==========================================
+// FILE: src/features/sync/SyncEngine.ts
+// Phase 8.3 Enterprise Outbox Sync Engine
+// ==========================================
+
+import { db, getCurrentUserSession } from "@/core/db";
 import { rtdb } from "@/services/firebase";
 import { ref, serverTimestamp, set } from "firebase/database";
+import { SYNC_PROTOCOL_VERSION } from "./sync.types";
+import { SyncLockManager } from "./sync.lock";
+import { DeviceManager } from "./device.manager";
 
 export type SyncStatus = 'PENDING' | 'SENDING' | 'FAILED' | 'CONFIRMED' | 'RETRYING';
 
@@ -35,8 +43,6 @@ export class SyncEngine {
   private static MAX_RETRIES = 5;
   private static BACKOFF_MS = [0, 2000, 5000, 15000, 30000, 60000]; // Exponential Backoff
   private static isProcessing = false;
-  private static branchId = "BRH-MAIN-001";
-  private static userId = "system";
 
   /**
    * Initializes the Sync Engine Event Listeners
@@ -49,7 +55,6 @@ export class SyncEngine {
 
     // Offline Recovery - process on load
     if (typeof window !== "undefined") {
-      // Trigger drain immediately on boot if online to recover pending/retrying events
       if (navigator.onLine) {
          setTimeout(() => this.drainQueue(), 1000);
       }
@@ -69,15 +74,16 @@ export class SyncEngine {
   static async enqueue(type: string, payload: Record<string, unknown>, entityType: string = 'generic', customIdempotencyKey?: string) {
     const mutationId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
+    const session = getCurrentUserSession();
     
     // Idempotency pattern: EntityType:EntityId:MutationType:Version:BranchId
-    // If version is missing, start with 1
     const version = (payload?.version as number) || 1;
     const entityId = (payload?.id as string) || 'unknown';
+    const branchId = session.branchId || 'default-branch';
     
-    const idempotencyKey = customIdempotencyKey || this.generateIdempotencyKey(entityType, entityId, type, version, this.branchId);
+    const idempotencyKey = customIdempotencyKey || this.generateIdempotencyKey(entityType, entityId, type, version, branchId);
 
-    // Filter sensitive data before storing locally (best practice)
+    // Filter sensitive data before storing locally
     const sanitizedPayload = this.sanitizePayload(payload) || {};
 
     const outboxEvent: OutboxEvent = {
@@ -130,43 +136,43 @@ export class SyncEngine {
    * Main Queue Drain logic (Outbox Pattern) with strict lock
    */
   static async drainQueue() {
-    if (this.isProcessing) return; // Strict Queue Lock
+    if (this.isProcessing) return;
     if (!navigator.onLine) return;
-    
-    this.isProcessing = true;
 
-    try {
-      // Fetch PENDING and RETRYING events sorted by creation to maintain strict order
-      const pendingEvents = await db.outbox
-        .where('status').anyOf('PENDING', 'RETRYING')
-        .sortBy('createdAt');
+    await SyncLockManager.withSyncLock(async () => {
+      this.isProcessing = true;
 
-      if (pendingEvents.length === 0) {
-        return; 
-      }
+      try {
+        const pendingEvents = await db.outbox
+          .where('status').anyOf('PENDING', 'RETRYING')
+          .sortBy('createdAt');
 
-      for (const event of pendingEvents) {
-        // Exponential Backoff Check
-        if (event.status === 'RETRYING') {
-          const delay = this.BACKOFF_MS[Math.min(event.retries, this.BACKOFF_MS.length - 1)] || 60000;
-          const timeSinceLastRetry = Date.now() - new Date(event.updatedAt).getTime();
-          if (timeSinceLastRetry < delay) {
-            continue; // Skip this event for now, backoff active
-          }
+        if (pendingEvents.length === 0) {
+          return; 
         }
 
-        await this.processEvent(event);
+        for (const event of pendingEvents) {
+          if (event.status === 'RETRYING') {
+            const delay = this.BACKOFF_MS[Math.min(event.retries, this.BACKOFF_MS.length - 1)] || 60000;
+            const timeSinceLastRetry = Date.now() - new Date(event.updatedAt).getTime();
+            if (timeSinceLastRetry < delay) {
+              continue;
+            }
+          }
+
+          await this.processEvent(event);
+        }
+      } catch (error: unknown) {
+        const err = error as Error;
+        console.error("[SyncEngine] Drain queue failed:", err);
+      } finally {
+        this.isProcessing = false;
       }
-    } catch (error: unknown) {
-      const err = error as Error;
-      console.error("[SyncEngine] Drain queue failed:", err);
-    } finally {
-      this.isProcessing = false; // Always release lock
-    }
+    });
   }
 
   /**
-   * Strip secrets, API keys, tokens before sending to Firebase
+   * Strip secrets, API keys, tokens before sending
    */
   private static sanitizePayload(payload: Record<string, unknown> | null | undefined): Record<string, unknown> | null | undefined {
     if (!payload || typeof payload !== 'object') return payload;
@@ -177,9 +183,9 @@ export class SyncEngine {
       if (forbiddenKeys.some(fk => key.toLowerCase().includes(fk))) {
         delete sanitized[key];
       } else if (typeof sanitized[key] === 'function') {
-        delete sanitized[key]; // Never send functions
+        delete sanitized[key];
       } else if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
-        sanitized[key] = this.sanitizePayload(sanitized[key] as Record<string, unknown>); // recursive
+        sanitized[key] = this.sanitizePayload(sanitized[key] as Record<string, unknown>);
       }
     }
     return sanitized;
@@ -189,6 +195,10 @@ export class SyncEngine {
    * Processes a single Outbox Event
    */
   private static async processEvent(event: OutboxEvent) {
+    const session = getCurrentUserSession();
+    const device = DeviceManager.getDeviceIdentity();
+    const branchId = session.branchId || "default-branch";
+
     try {
       // Mark as SENDING
       await db.outbox.update(event.id!, { 
@@ -196,31 +206,84 @@ export class SyncEngine {
         updatedAt: new Date().toISOString() 
       });
 
-      if (!rtdb) {
-        console.warn("[SYNC_ENGINE] RTDB not initialized, skipping outbox network push.");
-        return;
-      }
-      const pubRef = ref(rtdb, `replication_events/${this.branchId}/${event.mutationId}`);
-      
-      const payloadRef = {
-        mutationId: event.mutationId,
-        idempotencyKey: event.idempotencyKey,
-        type: event.type,
-        payload: event.payload,
-        sequence: Date.now(),
-        clientTimestamp: event.createdAt,
-        serverTimestamp: serverTimestamp(),
-      };
+      // 1. Send via HTTPS sync API endpoint
+      const token = localStorage.getItem("pharmaflow_token") || "local-admin-token";
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-      await set(pubRef, payloadRef);
-
-      // Mark as CONFIRMED
-      await db.outbox.update(event.id!, { 
-        status: 'CONFIRMED', 
-        updatedAt: new Date().toISOString() 
+      const response = await fetch("/api/v1/sync/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "X-Tenant-ID": session.tenantId,
+          "X-Branch-ID": branchId,
+          "X-User-ID": session.userId,
+          "X-Device-ID": device.deviceId
+        },
+        body: JSON.stringify({
+          tenantId: session.tenantId,
+          branchId,
+          userId: session.userId,
+          deviceId: device.deviceId,
+          schemaVersion: SYNC_PROTOCOL_VERSION,
+          clientVersion: "8.3.0",
+          mutations: [{
+            id: event.mutationId,
+            entity: event.entityType || event.type || "MUTATION",
+            operation: event.type === "DELETE" ? "DELETE" : "CREATE",
+            payload: event.payload,
+            idempotencyKey: event.idempotencyKey,
+            timestamp: event.createdAt
+          }]
+        }),
+        signal: controller.signal
       });
-      
-      this.log('SYNC_SUCCESS', `Successfully synced ${event.type}`, event.mutationId, 'SUCCESS', event.entityType, event.payload?.version as number | undefined);
+
+      clearTimeout(timeoutId);
+
+      // 2. Also replicate to Firebase RTDB if available
+      if (rtdb) {
+        try {
+          const pubRef = ref(rtdb, `replication_events/${branchId}/${event.mutationId}`);
+          await set(pubRef, {
+            mutationId: event.mutationId,
+            idempotencyKey: event.idempotencyKey,
+            type: event.type,
+            payload: event.payload,
+            sequence: Date.now(),
+            clientTimestamp: event.createdAt,
+            serverTimestamp: serverTimestamp()
+          });
+        } catch (rtdbErr) {
+          console.warn("[SyncEngine] Firebase RTDB replication note:", rtdbErr);
+        }
+      }
+
+      if (response.ok) {
+        // Mark as CONFIRMED
+        await db.outbox.update(event.id!, { 
+          status: 'CONFIRMED', 
+          updatedAt: new Date().toISOString() 
+        });
+        
+        this.log('SYNC_SUCCESS', `Successfully synced ${event.type}`, event.mutationId, 'SUCCESS', event.entityType, event.payload?.version as number | undefined);
+      } else {
+        const errorBody = await response.json().catch(() => ({}));
+        const isFatal = [400, 401, 403].includes(response.status) || errorBody.errorCode === "SCHEMA_VERSION_MISMATCH";
+        
+        const newRetries = (event.retries || 0) + 1;
+        const nextStatus = isFatal || newRetries >= this.MAX_RETRIES ? 'FAILED' : 'RETRYING';
+        
+        await db.outbox.update(event.id!, { 
+          status: nextStatus, 
+          retries: newRetries,
+          error: errorBody.message || `HTTP ${response.status}`,
+          updatedAt: new Date().toISOString() 
+        });
+
+        this.log('SYNC_FAIL', `Failed to sync. Retry ${newRetries}/${this.MAX_RETRIES}. Error: ${errorBody.message || response.statusText}`, event.mutationId, 'ERROR', event.entityType, event.payload?.version as number | undefined);
+      }
 
     } catch (error: unknown) {
       const err = error as Error;
@@ -252,13 +315,14 @@ export class SyncEngine {
     version?: number
   ) {
     try {
+      const session = getCurrentUserSession();
       await db.syncLogs.add({
         action,
         details,
         mutationId,
         entity,
-        user: this.userId,
-        branch: this.branchId,
+        user: session.userId || "system",
+        branch: session.branchId || "default-branch",
         version,
         result,
         timestamp: new Date().toISOString()
