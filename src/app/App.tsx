@@ -27,7 +27,7 @@ import { IS_PREVIEW } from '@/constants';
 import { 
   X, AlertTriangle, RefreshCw, LogOut, ShieldCheck, Building2,
   Users, BarChart2, ArrowRightLeft,
-  Landmark, Sliders, FileSpreadsheet, Settings
+  Landmark, Sliders, Settings
 } from 'lucide-react';
 
 import {
@@ -813,18 +813,6 @@ function MainLayout() {
                     </div>
                     {(currentView === 'reconciliation' || currentView === 'adjustments-registry') && <motion.div layoutId="active-nav-fi3" className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
                   </button>
-
-                  {/* 3. التقارير المالية الموحدة */}
-                  <button 
-                    onClick={() => handleNav('reports/financial-engine')}
-                    className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-[11px] font-black transition-all group ${currentView === 'reports/financial-engine' ? 'bg-[#1E4D4D] text-white shadow-lg shadow-emerald-950/10' : 'text-slate-500 hover:bg-slate-50 hover:text-[#1E4D4D]'}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={`${currentView === 'reports/financial-engine' ? 'text-emerald-400' : 'text-slate-400 group-hover:text-[#1E4D4D]'}`}><FileSpreadsheet size={15} /></span>
-                      <span>التقارير المالية الموحدة</span>
-                    </div>
-                    {currentView === 'reports/financial-engine' && <motion.div layoutId="active-nav-fi5" className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
-                  </button>
                 </div>
               </div>
             )}
@@ -871,11 +859,11 @@ function MainLayout() {
               </div>
             )}
 
-            {/* 6. قسم سجل الأمان والتدقيق */}
+            {/* 6. قسم إعدادات المنظومة */}
             {can(profile?.role, 'MANAGE_SYSTEM') && (
               <div>
                 <p className="px-4 text-[11px] font-black text-slate-400 uppercase tracking-[2px] mb-3">
-                  قسم سجل الأمان والتدقيق
+                  إعدادات المنظومة
                 </p>
                 <div className="space-y-1">
                   <button 
@@ -887,17 +875,6 @@ function MainLayout() {
                       <span>الإعدادات</span>
                     </div>
                     {currentView === 'settings' && <motion.div layoutId="active-nav-settings" className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
-                  </button>
-
-                  <button 
-                    onClick={() => handleNav('audit-history')}
-                    className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-[11px] font-black transition-all group ${currentView === 'audit-history' || currentView === 'security-audit' ? 'bg-[#1E4D4D] text-white shadow-lg shadow-emerald-900/10' : 'text-slate-500 hover:bg-slate-50 hover:text-[#1E4D4D]'}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={`${currentView === 'audit-history' || currentView === 'security-audit' ? 'text-emerald-400' : 'text-slate-400 group-hover:text-[#1E4D4D]'}`}><ShieldCheck size={15} /></span>
-                      <span>سجل الأمان والتدقيق</span>
-                    </div>
-                    {(currentView === 'audit-history' || currentView === 'security-audit') && <motion.div layoutId="active-nav-sec" className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
                   </button>
                 </div>
               </div>
@@ -950,12 +927,12 @@ function MainLayout() {
         <main className={`flex-1 min-h-0 relative ${
           ['sales', 'purchases'].includes(currentView)
             ? 'h-full overflow-hidden p-0 w-full max-w-[540px] md:max-w-xl mx-auto flex flex-col bg-white'
-            : 'overflow-y-auto overflow-x-hidden bg-[#F8FAFA] custom-scrollbar w-full max-w-[480px] mx-auto px-2 sm:px-4 py-2 sm:py-4'
+            : 'overflow-y-auto overflow-x-hidden bg-[#F8FAFA] custom-scrollbar w-full max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-6'
         }`}>
           <div className={`w-full mx-auto ${
             ['sales', 'purchases'].includes(currentView)
               ? 'h-full flex-1 flex flex-col overflow-hidden box-border'
-              : 'max-w-[480px] min-h-full box-border overflow-x-hidden'
+              : 'w-full min-h-full box-border overflow-x-hidden'
           }`}>
             <Suspense fallback={<div className="flex items-center justify-center h-full min-h-[400px]"><div className="w-10 h-10 border-4 border-[#10B981] border-t-transparent rounded-full animate-spin"></div></div>}>
               {(() => {

@@ -7,8 +7,7 @@ import {
   Upload, Phone, LifeBuoy, Users, Moon, Sun, Globe,
   PackageCheck, Sliders, Truck, Clock,
   FileText, Scale, ArrowRightLeft, BarChart2,
-  Landmark, FileSpreadsheet,
-  ShieldCheck
+  Landmark
 } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useUI } from '@/contexts/AppContext';
@@ -209,13 +208,6 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({ isOpen, onClose, onNav
                   <Landmark size={16} className="text-emerald-600 dark:text-emerald-400" />
                   <span>المركز المالي الموحد</span>
                 </button>
-                <button 
-                  onClick={() => handleNavClick('reports/financial-engine')}
-                  className="w-full text-right text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700/60 transition-colors flex items-center gap-2.5 cursor-pointer"
-                >
-                  <FileSpreadsheet size={16} className="text-teal-600 dark:text-teal-400" />
-                  <span>التقارير المالية الموحدة</span>
-                </button>
               </AccordionSection>
 
               {/* 5️⃣ Smart Branch Analytics */}
@@ -240,9 +232,9 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({ isOpen, onClose, onNav
                 </button>
               </AccordionSection>
 
-              {/* 7️⃣ Security & Audit Log + Settings */}
+              {/* 7️⃣ Settings */}
               {(!profile?.role || can(profile?.role, 'MANAGE_SYSTEM')) && (
-                <AccordionSection title="قسم سجل الأمان والتدقيق" icon={ShieldCheck}>
+                <AccordionSection title="إعدادات المنظومة" icon={Settings}>
                   <div className="space-y-1">
                     <button 
                       onClick={() => handleNavClick('settings')}
@@ -250,13 +242,6 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({ isOpen, onClose, onNav
                     >
                       <Settings size={16} className="text-emerald-600 dark:text-emerald-400" />
                       <span>الإعدادات</span>
-                    </button>
-                    <button 
-                      onClick={() => handleNavClick('audit-history')}
-                      className="w-full text-right text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700/60 transition-colors flex items-center gap-2.5 cursor-pointer"
-                    >
-                      <ShieldCheck size={16} className="text-emerald-600 dark:text-emerald-400" />
-                      <span>سجل الأمان والتدقيق</span>
                     </button>
                   </div>
                 </AccordionSection>

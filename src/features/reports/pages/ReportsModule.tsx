@@ -50,11 +50,11 @@ const REPORTS = [
   { 
     id: 'financial-engine', 
     category: 'financial',
-    title: 'محرك التقارير المالية المتكامل', 
+    title: 'مركز التقارير والتحليلات المالية الموحد (Enterprise Center)', 
     icon: <BarChart3 size={24} className="text-white" />, 
-    color: 'bg-emerald-700',
+    color: 'bg-[#1E4D4D]',
     route: 'reports/financial-engine',
-    description: 'الميزان التجاري، الأرباح والخسائر، الميزانية العمومية، التدفقات النقدية، تقييم المخزون والضرائب مجمعة.'
+    description: 'المنصة المركزية الشاملة: ميزان المراجعة، الأرباح والخسائر، الميزانية العمومية، التدفقات النقدية، تقييم المخزون، تعمير الذمم، الضرائب وسجل التدقيق مع تصدير PDF و Excel.'
   },
   { 
     id: 'remaining-stock', 

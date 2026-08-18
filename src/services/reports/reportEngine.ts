@@ -543,6 +543,84 @@ export class ReportEngine {
     return result;
   }
 
+  /**
+   * Account Movements & General Ledger Statement (كشف حركة الحسابات ودفتر الأستاذ)
+   */
+  static async getAccountMovement(start?: string, end?: string, accountId?: string) {
+    const cacheKey = `account-movement-${start || 'all'}-${end || 'all'}-${accountId || 'all'}`;
+    const cached = reportCache.get<unknown[]>(cacheKey);
+    if (cached) return cached;
+
+    const entries = await db.journalEntries.toArray();
+    const accounts = await db.accounts.toArray();
+    const accountMap = new Map<string, string>();
+    accounts.forEach(a => {
+      if (a.id && a.name) accountMap.set(String(a.id), String(a.name));
+    });
+
+    const movements: {
+      id: string;
+      date: string;
+      entryNumber: string;
+      description: string;
+      accountId: string;
+      accountName: string;
+      debit: number;
+      credit: number;
+      reference?: string;
+    }[] = [];
+
+    entries
+      .filter((e: JournalEntry) => {
+        if (e.status !== 'Posted') return false;
+        const d = e.date || '';
+        if (start && d < start) return false;
+        if (end && d > end) return false;
+        return true;
+      })
+      .forEach((e: JournalEntry) => {
+        (e.lines || []).forEach((l: JournalLine) => {
+          if (accountId && l.accountId !== accountId) return;
+          movements.push({
+            id: `${e.id}-${l.accountId}`,
+            date: e.date || '',
+            entryNumber: e.entryNumber || e.id || '',
+            description: (typeof l.description === 'string' ? l.description : '') || (typeof e.description === 'string' ? e.description : '') || 'قيد يومية',
+            accountId: l.accountId,
+            accountName: accountMap.get(l.accountId) || (typeof l.accountName === 'string' ? l.accountName : '') || l.accountId || '',
+            debit: Number(l.debit || 0),
+            credit: Number(l.credit || 0),
+            reference: (e as any).reference || e.sourceType || ''
+          });
+        });
+      });
+
+    movements.sort((a, b) => (b.date > a.date ? 1 : -1));
+    reportCache.set(cacheKey, movements);
+    return movements;
+  }
+
+  /**
+   * Sensitive Audit Trail & Governance Summary (سجل التدقيق والعمليات الحساسة)
+   */
+  static async getAuditSummary(start?: string, end?: string, limit = 200) {
+    try {
+      let logs = await db.auditLogs.orderBy('timestamp').reverse().toArray();
+      if (start || end) {
+        logs = logs.filter(l => {
+          const d = l.timestamp || '';
+          if (start && d < start) return false;
+          if (end && d > end) return false;
+          return true;
+        });
+      }
+      return logs.slice(0, limit);
+    } catch (e) {
+      console.error('[ReportEngine] Failed to fetch audit logs:', e);
+      return [];
+    }
+  }
+
   // Stubs replacement
   static async getIncomeStatement(start?: string, end?: string) {
     return await this.getProfitLoss(start, end);

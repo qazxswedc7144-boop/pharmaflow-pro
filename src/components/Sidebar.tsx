@@ -4,13 +4,11 @@ import {
   X, 
   Users, 
   Building2, 
-  ShieldCheck,
-  PlusCircle,
-  LogOut,
-  BarChart2,
-  Landmark,
-  Sliders,
-  FileSpreadsheet
+  PlusCircle, 
+  LogOut, 
+  BarChart2, 
+  Landmark, 
+  Sliders 
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
@@ -43,7 +41,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       items: [
         { label: 'المركز المالي الموحد', path: '/consolidation', icon: Landmark },
         { label: 'التسويات', path: '/reconciliation', icon: Sliders },
-        { label: 'التقارير المالية الموحدة', path: '/reports/financial-engine', icon: FileSpreadsheet },
       ],
     },
     {
@@ -56,12 +53,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       title: 'قسم التحويل الدوائي بين الفروع',
       items: [
         { label: 'التحويلات بين الفروع', path: '/branch-transfers', icon: PlusCircle },
-      ],
-    },
-    {
-      title: 'قسم سجل الأمان والتدقيق',
-      items: [
-        { label: 'سجل الأمان والتدقيق', path: '/audit-history', icon: ShieldCheck },
       ],
     },
   ];

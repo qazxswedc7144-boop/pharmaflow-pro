@@ -108,8 +108,7 @@ async function startServer() {
     }, 100);
   }
 
-  const RAW_PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const PORT = (!isNaN(RAW_PORT) && RAW_PORT > 0) ? RAW_PORT : 3000;
+  const PORT = 3000;
   
   // Clean up any stale processes that might be holding onto the port or 24678 in development
   if (process.env.NODE_ENV !== "production") {
@@ -434,27 +433,9 @@ async function startServer() {
     });
   });
 
-  // In multi-tier environments, also bind port 3000 if the primary port was assigned elsewhere
-  let secondaryServer: any = null;
-  if (PORT !== 3000) {
-    try {
-      secondaryServer = app.listen(3000, "0.0.0.0", () => {
-        console.log(`[BOOT] Secondary reverse-proxy listener bound on http://0.0.0.0:3000`);
-      });
-      secondaryServer.on("error", (err: any) => {
-        console.warn(`[BOOT] Secondary port 3000 notice:`, err?.message || err);
-      });
-    } catch (e: any) {
-      console.warn(`[BOOT] Could not bind secondary port 3000:`, e?.message || e);
-    }
-  }
-
-  // Graceful shutdown handling for all active listeners
+  // Graceful shutdown handling for active listener
   const gracefulShutdown = (signal: string) => {
     console.log(`[SERVER] Received ${signal} signal. Shutting down server gracefully...`);
-    if (secondaryServer) {
-      try { secondaryServer.close(); } catch {}
-    }
     server.close(() => {
       console.log("[SERVER] HTTP server closed cleanly.");
       process.exit(0);

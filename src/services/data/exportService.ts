@@ -41,10 +41,90 @@ export const ExportService = {
   },
 
   /**
-   * legacy support for existing code
+   * تصدير جداول البيانات بصيغة Excel XML Spreadsheet الرسمية المتوافقة مع Microsoft Excel و Google Sheets
    */
-  exportToExcel: function(items: any[], fileName: string, _headers: string[]) {
-    return this.exportToCSV(items, fileName);
+  exportToExcel: function(items: any[], fileName: string, customHeaders?: string[]) {
+    if (!items || items.length === 0) return;
+
+    const headers = customHeaders || Object.keys(items[0]);
+    
+    // Generate XML-based Microsoft Excel 2003 Spreadsheet (.xls) with RTL support and UTF-8 encoding
+    const escapeXml = (unsafe: any) => {
+      if (unsafe === null || unsafe === undefined) return '';
+      return String(unsafe)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    };
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Default" ss:Name="Normal">
+   <Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
+   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Color="#1E293B"/>
+  </Style>
+  <Style ss:ID="Header">
+   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0F766E"/>
+   </Borders>
+   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/>
+   <Interior ss:Color="#1E4D4D" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="RowEven">
+   <Alignment ss:Vertical="Center"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="RowOdd">
+   <Alignment ss:Vertical="Center"/>
+   <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="NumberCell">
+   <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+   <NumberFormat ss:Format="#,##0.00"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="${escapeXml(fileName.substring(0, 31))}">
+  <Table ss:DefaultRowHeight="22" ss:DefaultColumnWidth="120">
+   <Row ss:Height="26">
+    ${headers.map(h => `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`).join('\n    ')}
+   </Row>
+`;
+
+    items.forEach((item, index) => {
+      const styleId = index % 2 === 0 ? 'RowOdd' : 'RowEven';
+      xml += `   <Row ss:Height="20">\n`;
+      headers.forEach(h => {
+        const val = item[h] !== undefined ? item[h] : '';
+        const isNum = typeof val === 'number';
+        xml += `    <Cell ss:StyleID="${styleId}"><Data ss:Type="${isNum ? 'Number' : 'String'}">${escapeXml(val)}</Data></Cell>\n`;
+      });
+      xml += `   </Row>\n`;
+    });
+
+    xml += `  </Table>
+ </Worksheet>
+</Workbook>`;
+
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${fileName}.xls`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    db.addAuditLog('SYSTEM', 'OTHER', fileName, "تم تصدير تقرير بصيغة Excel (XLS/Spreadsheet)");
   },
 
   /**
