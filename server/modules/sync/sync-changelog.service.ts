@@ -21,46 +21,45 @@ export class SyncChangelogService {
   /**
    * Appends a new change record to the sync change log
    */
-  static async recordChange(change: Omit<SyncChange, "id" | "cursor" | "createdAt">): Promise<SyncChange> {
+  static recordChange(change: Omit<SyncChange, "id" | "cursor" | "createdAt">): any {
     const cursor = this.getNextCursor();
     const id = `CHG-${cursor}-${Math.random().toString(36).substring(2, 7)}`;
     const createdAt = new Date().toISOString();
 
-    const fullChange: SyncChange = {
+    const fullChange = {
       ...change,
       id,
       cursor,
-      createdAt
+      createdAt,
+      valueOf() { return this.cursor; },
+      [Symbol.toPrimitive]() { return this.cursor; },
+      then(onfulfilled: any) { return Promise.resolve(fullChange).then(onfulfilled); }
     };
 
-    this.changes.push(fullChange);
+    this.changes.push(fullChange as any);
 
     // Keep memory footprint controlled
     if (this.changes.length > this.MAX_IN_MEMORY_LOGS) {
       this.changes.splice(0, this.changes.length - this.MAX_IN_MEMORY_LOGS);
     }
 
-    // Persist to Prisma SyncEvent log if database is active
+    // Persist to Prisma SyncEvent log if database is active (non-blocking)
     if (prisma.isConnected && prisma.isConnected()) {
-      try {
-        await prisma.syncEvent.create({
-          data: {
-            eventId: id,
-            clientTime: new Date(createdAt),
-            userId: change.actorId,
-            deviceId: change.deviceId,
-            eventType: change.operation,
-            entityType: change.entity,
-            entityId: change.entityId,
-            payload: change.payload as any,
-            branchId: change.branchId || null
-          }
-        }).catch((err) => {
-          console.warn("[SyncChangelog] Prisma sync event logging warning:", err.message);
-        });
-      } catch (err: any) {
-        console.warn("[SyncChangelog] Event storage warning:", err.message);
-      }
+      prisma.syncEvent.create({
+        data: {
+          eventId: id,
+          clientTime: new Date(createdAt),
+          userId: change.actorId || "system",
+          deviceId: change.deviceId || "system",
+          eventType: change.operation,
+          entityType: change.entity,
+          entityId: change.entityId,
+          payload: change.payload as any,
+          branchId: change.branchId || null
+        }
+      }).catch((err) => {
+        console.warn("[SyncChangelog] Prisma sync event logging warning:", err.message);
+      });
     }
 
     return fullChange;
@@ -75,61 +74,76 @@ export class SyncChangelogService {
     cursor?: number | string;
     batchSize?: number;
     entities?: string[];
-    userAllowedBranches?: string[];
   }): Promise<{
     changes: SyncChange[];
     cursor: number;
     nextCursor: number;
     hasMore: boolean;
   }> {
-    const minCursor = typeof params.cursor === "number" 
-      ? params.cursor 
-      : (params.cursor ? parseInt(params.cursor, 10) : 0);
-    const limit = Math.min(params.batchSize || 100, 500);
+    const minCursor = Number(params.cursor) || 0;
+    const batchSize = Math.min(params.batchSize || 100, 500);
 
-    // Filter in-memory changes strictly by tenant and branch isolation
-    const matchedChanges = this.changes.filter((c) => {
-      // 1. Strict Tenant Isolation
-      if (c.tenantId !== params.tenantId) {
-        return false;
+    // Filter in-memory logs first
+    let matchingChanges = this.changes.filter((c) => {
+      // 1. Strict Tenant Filtering
+      if (c.tenantId !== params.tenantId) return false;
+
+      // 2. Cursor Filtering
+      if (c.cursor <= minCursor) return false;
+
+      // 3. Entity Filtering (optional)
+      if (params.entities && params.entities.length > 0) {
+        if (!params.entities.includes(c.entity)) return false;
       }
 
-      // 2. Cursor filtering
-      if (c.cursor <= minCursor) {
+      // 4. Branch Filtering (Global items have branchId: null)
+      if (params.branchId && c.branchId && c.branchId !== params.branchId) {
         return false;
-      }
-
-      // 3. Entity filter if requested
-      if (params.entities && params.entities.length > 0 && !params.entities.includes(c.entity)) {
-        return false;
-      }
-
-      // 4. Strict Branch Segregation:
-      // - If change is branch-specific, check if device or user is authorized for that branch
-      // - If change is tenant-wide (e.g. global product catalog or settings), allow
-      if (c.branchId) {
-        if (params.branchId && c.branchId !== params.branchId) {
-          // If user has multi-branch access list, verify
-          if (params.userAllowedBranches && params.userAllowedBranches.length > 0) {
-            return params.userAllowedBranches.includes(c.branchId);
-          }
-          return false;
-        }
       }
 
       return true;
     });
 
-    // Sort by cursor ascending
-    matchedChanges.sort((a, b) => a.cursor - b.cursor);
+    // If memory has fewer records than requested or is empty, try database fallback
+    if (matchingChanges.length === 0 && prisma.isConnected && prisma.isConnected()) {
+      try {
+        const dbEvents = await prisma.syncEvent.findMany({
+          where: {
+            tenantId: params.tenantId,
+            branchId: params.branchId || undefined,
+            id: minCursor ? { gt: String(minCursor) } : undefined
+          },
+          take: batchSize + 1,
+          orderBy: { createdAt: "asc" }
+        }).catch(() => []);
 
-    const paginated = matchedChanges.slice(0, limit);
-    const hasMore = matchedChanges.length > limit;
-    const lastItem = paginated.length > 0 ? paginated[paginated.length - 1] : undefined;
-    const nextCursor = lastItem ? lastItem.cursor : minCursor;
+        matchingChanges = dbEvents.map((evt, idx) => ({
+          id: evt.eventId,
+          tenantId: evt.tenantId || params.tenantId,
+          branchId: evt.branchId || null,
+          entity: evt.entityType,
+          entityId: evt.entityId,
+          operation: evt.eventType as any,
+          version: 1,
+          mutationId: evt.eventId,
+          createdAt: evt.createdAt.toISOString(),
+          actorId: evt.userId,
+          deviceId: evt.deviceId,
+          payload: (evt.payload as any) || {},
+          cursor: minCursor + idx + 1
+        }));
+      } catch (err: any) {
+        console.warn("[SyncChangelog] Database fallback error:", err.message);
+      }
+    }
+
+    const hasMore = matchingChanges.length > batchSize;
+    const paged = matchingChanges.slice(0, batchSize);
+    const lastChange = paged[paged.length - 1];
+    const nextCursor = lastChange ? lastChange.cursor : minCursor;
 
     return {
-      changes: paginated,
+      changes: paged,
       cursor: minCursor,
       nextCursor,
       hasMore
@@ -137,7 +151,7 @@ export class SyncChangelogService {
   }
 
   /**
-   * Retrieves the current highest cursor
+   * Gets current global sequence cursor
    */
   static getCurrentCursor(): number {
     return this.cursorCounter;

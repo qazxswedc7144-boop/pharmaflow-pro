@@ -173,6 +173,13 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({ isOpen, onClose, onNav
               {/* 3️⃣ Advanced Accounting & Finance */}
               <AccordionSection title="قسم المحاسبة والمالية المتقدم" icon={FileText}>
                 <button 
+                  onClick={() => handleNavClick('reports/financial-engine')}
+                  className="w-full text-right text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700/60 transition-colors flex items-center gap-2.5 cursor-pointer"
+                >
+                  <BarChart2 size={16} className="text-[#1E4D4D] dark:text-emerald-400" />
+                  <span>مركز التقارير والذكاء المالي الموحد</span>
+                </button>
+                <button 
                   onClick={() => handleNavClick('reconciliation')}
                   className="w-full text-right text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700/60 transition-colors flex items-center gap-2.5 cursor-pointer"
                 >

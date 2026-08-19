@@ -11,6 +11,7 @@ interface StoredIdempotencyRecord {
   idempotencyKey: string;
   payloadHash: string;
   result: PerMutationResult;
+  status: "IN_FLIGHT" | "COMPLETED";
   createdAt: number;
   expiresAt: number;
 }
@@ -32,7 +33,8 @@ export class SyncIdempotencyService {
    */
   static computePayloadHash(payload: unknown): string {
     try {
-      const serialized = JSON.stringify(payload, Object.keys(payload as any || {}).sort());
+      if (payload === null || payload === undefined) return "empty_hash";
+      const serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
       return crypto.createHash("sha256").update(serialized || "").digest("hex");
     } catch {
       return crypto.createHash("sha256").update(String(payload)).digest("hex");
@@ -40,8 +42,7 @@ export class SyncIdempotencyService {
   }
 
   /**
-   * Checks if a mutation was already processed.
-   * Returns previous result if found.
+   * Checks if a mutation was already processed or is currently in flight.
    */
   static check(
     tenantId: string,
@@ -77,6 +78,107 @@ export class SyncIdempotencyService {
   }
 
   /**
+   * Checks idempotency status returning detailed state for test suite and API
+   */
+  static async checkIdempotency(params: {
+    tenantId: string;
+    deviceId: string;
+    idempotencyKey: string;
+    payload: unknown;
+  }): Promise<{
+    status: "NOT_SEEN" | "SEEN_SUCCESS" | "HASH_MISMATCH" | "IN_FLIGHT";
+    cachedResponse?: any;
+  }> {
+    const scopedKey = this.getScopedKey(params.tenantId, params.deviceId, params.idempotencyKey);
+    const existing = this.store.get(scopedKey);
+
+    if (!existing) {
+      return { status: "NOT_SEEN" };
+    }
+
+    if (Date.now() > existing.expiresAt) {
+      this.store.delete(scopedKey);
+      return { status: "NOT_SEEN" };
+    }
+
+    const currentHash = this.computePayloadHash(params.payload);
+    if (existing.payloadHash !== currentHash) {
+      return { status: "HASH_MISMATCH" };
+    }
+
+    if (existing.status === "IN_FLIGHT") {
+      return { status: "IN_FLIGHT" };
+    }
+
+    return {
+      status: "SEEN_SUCCESS",
+      cachedResponse: existing.result.details || existing.result
+    };
+  }
+
+  /**
+   * Marks a mutation as currently in-flight to prevent race condition replays
+   */
+  static async markInFlight(params: {
+    tenantId: string;
+    deviceId: string;
+    idempotencyKey: string;
+    payload: unknown;
+  }): Promise<void> {
+    const scopedKey = this.getScopedKey(params.tenantId, params.deviceId, params.idempotencyKey);
+    const now = Date.now();
+    const payloadHash = this.computePayloadHash(params.payload);
+
+    this.store.set(scopedKey, {
+      scopedKey,
+      tenantId: params.tenantId,
+      deviceId: params.deviceId,
+      idempotencyKey: params.idempotencyKey,
+      payloadHash,
+      status: "IN_FLIGHT",
+      result: {
+        mutationId: params.idempotencyKey,
+        status: "DUPLICATE",
+        message: "Operation currently in flight"
+      },
+      createdAt: now,
+      expiresAt: now + this.TTL_MS
+    });
+  }
+
+  /**
+   * Records a successful execution in idempotency store
+   */
+  static async recordSuccess(params: {
+    tenantId: string;
+    deviceId: string;
+    idempotencyKey: string;
+    payload: unknown;
+    response: any;
+  }): Promise<void> {
+    const scopedKey = this.getScopedKey(params.tenantId, params.deviceId, params.idempotencyKey);
+    const now = Date.now();
+    const payloadHash = this.computePayloadHash(params.payload);
+
+    this.store.set(scopedKey, {
+      scopedKey,
+      tenantId: params.tenantId,
+      deviceId: params.deviceId,
+      idempotencyKey: params.idempotencyKey,
+      payloadHash,
+      status: "COMPLETED",
+      result: {
+        mutationId: params.idempotencyKey,
+        status: "DUPLICATE",
+        details: params.response,
+        processedAt: new Date().toISOString()
+      },
+      createdAt: now,
+      expiresAt: now + this.TTL_MS
+    });
+  }
+
+  /**
    * Records a processed mutation result
    */
   static record(
@@ -96,6 +198,7 @@ export class SyncIdempotencyService {
       deviceId,
       idempotencyKey,
       payloadHash,
+      status: "COMPLETED",
       result: {
         ...result,
         status: "DUPLICATE" // When replayed in future, indicate DUPLICATE status

@@ -9,11 +9,15 @@ export interface ConflictRecord {
   branchId?: string | null;
   mutationId: string;
   category: SyncConflictCategory;
-  entity: string;
+  entity?: string;
+  entityType?: string;
   entityId: string;
-  message: string;
-  clientRecord: Record<string, any>;
-  serverRecord: Record<string, any> | null;
+  message?: string;
+  conflictReason?: string;
+  clientRecord?: Record<string, any>;
+  serverRecord?: Record<string, any> | null;
+  originalSnapshot?: Record<string, any>;
+  incomingSnapshot?: Record<string, any>;
   detectedAt: string;
   status: "OPEN" | "RESOLVED" | "OVERRIDDEN" | "DISCARDED";
   resolutionStrategy?: string;
@@ -25,17 +29,7 @@ export class SyncConflictService {
   private static conflicts: ConflictRecord[] = [];
 
   /**
-   * Evaluates if a mutation conflicts with existing server-side state across the 10 categories:
-   * 1. SAME_RECORD_CONFLICT
-   * 2. VERSION_CONFLICT
-   * 3. STOCK_CONFLICT
-   * 4. ACCOUNTING_CONFLICT
-   * 5. DUPLICATE_MUTATION
-   * 6. BRANCH_CONFLICT
-   * 7. TENANT_CONFLICT
-   * 8. PERMISSION_CONFLICT
-   * 9. DELETED_RECORD_CONFLICT
-   * 10. SCHEMA_VERSION_CONFLICT
+   * Evaluates if a mutation conflicts with existing server-side state across the 10 categories
    */
   static evaluateConflict(params: {
     mutation: SyncMutation;
@@ -156,13 +150,120 @@ export class SyncConflictService {
   }
 
   /**
+   * Helper to detect conflicts directly from snapshots/versions
+   */
+  static detectConflict(params: {
+    tenantId: string;
+    branchId?: string | null;
+    entityType: string;
+    entityId: string;
+    mutationId: string;
+    incomingVersion?: number;
+    serverRecord: Record<string, any> | null;
+    incomingPayload: Record<string, any>;
+    originalSnapshot?: Record<string, any>;
+    incomingSnapshot?: Record<string, any>;
+    conflictReason?: string;
+  }): {
+    hasConflict: boolean;
+    category?: SyncConflictCategory;
+    conflictReason?: string;
+    resolutionStrategy?: string;
+  } {
+    const { serverRecord, incomingPayload, incomingVersion, entityType } = params;
+
+    // Check deleted record conflict
+    if (serverRecord && serverRecord.isDeleted) {
+      return {
+        hasConflict: true,
+        category: "DELETED_RECORD_CONFLICT",
+        conflictReason: "Target entity was deleted on server",
+        resolutionStrategy: "SERVER_WINS"
+      };
+    }
+
+    // Check version conflict
+    if (serverRecord && serverRecord.version !== undefined && incomingVersion !== undefined) {
+      if (serverRecord.version > incomingVersion) {
+        return {
+          hasConflict: true,
+          category: "VERSION_CONFLICT",
+          conflictReason: `Server has version ${serverRecord.version}, incoming is version ${incomingVersion}`,
+          resolutionStrategy: "RETRY_WITH_NEW_VERSION"
+        };
+      }
+    }
+
+    // Check stock conflict
+    if (entityType === "INVENTORY_BATCH" && serverRecord && incomingPayload.requestedReduction !== undefined) {
+      const currentStock = serverRecord.stock_qty ?? 0;
+      if (currentStock < incomingPayload.requestedReduction) {
+        return {
+          hasConflict: true,
+          category: "STOCK_CONFLICT",
+          conflictReason: `Current stock (${currentStock}) is less than requested reduction (${incomingPayload.requestedReduction})`,
+          resolutionStrategy: "MANUAL_MERGE"
+        };
+      }
+    }
+
+    // Check accounting conflict
+    if (entityType === "JOURNAL_ENTRY" && incomingPayload.lines && Array.isArray(incomingPayload.lines)) {
+      let totalDebit = 0;
+      let totalCredit = 0;
+      for (const line of incomingPayload.lines) {
+        totalDebit += line.debit || 0;
+        totalCredit += line.credit || 0;
+      }
+      if (Math.abs(totalDebit - totalCredit) > 0.001) {
+        return {
+          hasConflict: true,
+          category: "ACCOUNTING_CONFLICT",
+          conflictReason: `Unbalanced journal entry: Total Debit (${totalDebit}) does not equal Total Credit (${totalCredit})`,
+          resolutionStrategy: "MANUAL_MERGE"
+        };
+      }
+    }
+
+    return { hasConflict: false };
+  }
+
+  /**
    * Records a detected conflict for auditing and manual resolution workflow
    */
-  static recordConflict(record: Omit<ConflictRecord, "id" | "detectedAt" | "status">): ConflictRecord {
+  static recordConflict(record: {
+    tenantId: string;
+    branchId?: string | null;
+    entityType?: string;
+    entity?: string;
+    entityId: string;
+    mutationId: string;
+    category: SyncConflictCategory;
+    resolutionStrategy?: string;
+    originalSnapshot?: Record<string, any>;
+    incomingSnapshot?: Record<string, any>;
+    clientRecord?: Record<string, any>;
+    serverRecord?: Record<string, any> | null;
+    conflictReason?: string;
+    message?: string;
+  }): ConflictRecord {
     const id = `CONF-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const conflict: ConflictRecord = {
-      ...record,
       id,
+      tenantId: record.tenantId,
+      branchId: record.branchId,
+      entityType: record.entityType || record.entity || "GENERIC",
+      entity: record.entity || record.entityType || "GENERIC",
+      entityId: record.entityId,
+      mutationId: record.mutationId,
+      category: record.category,
+      resolutionStrategy: record.resolutionStrategy || "MANUAL_MERGE",
+      originalSnapshot: record.originalSnapshot || record.serverRecord || {},
+      incomingSnapshot: record.incomingSnapshot || record.clientRecord || {},
+      clientRecord: record.clientRecord || record.incomingSnapshot || {},
+      serverRecord: record.serverRecord || record.originalSnapshot || null,
+      conflictReason: record.conflictReason || record.message || "Conflict detected",
+      message: record.message || record.conflictReason || "Conflict detected",
       detectedAt: new Date().toISOString(),
       status: "OPEN"
     };

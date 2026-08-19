@@ -91,8 +91,10 @@ export interface SyncEnvelope {
 }
 
 export interface PerMutationResult {
+  id?: string;
   mutationId: string;
   status: SyncMutationStatus;
+  success?: boolean;
   errorCode?: string;
   serverVersion?: number;
   conflict?: {
@@ -104,16 +106,21 @@ export interface PerMutationResult {
   } | null;
   message?: string;
   processedAt?: string;
+  details?: any;
 }
 
 export interface SyncPushResponse {
   success: boolean;
+  errorCode?: string;
+  error?: string;
+  message?: string;
   tenantId: string;
   branchId?: string | null;
   serverTimestamp: number;
   processedCount: number;
   results: PerMutationResult[];
   summary: {
+    applied?: string[];
     successful: string[];
     duplicates: string[];
     conflicts: string[];

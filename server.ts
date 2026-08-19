@@ -75,6 +75,8 @@ import { authenticateToken } from "./server/middleware/auth.middleware";
 import { tenantContextMiddleware } from "./server/middleware/tenant.middleware";
 import organizationRouter from "./server/routes/organization.routes";
 import rbacRouter from "./server/routes/rbac.routes";
+import { reportingRouter } from "./server/routes/reporting.routes";
+import { platformRouter } from "./server/modules/platform/platform.router";
 
 
 function killStaleProcesses(port: number) {
@@ -190,6 +192,7 @@ async function startServer() {
   app.use("/api/auth", authRouter);
   app.use("/api/v1/auth", authV1Router);
   app.use("/api/v1/sync", syncV1Router);
+  app.use("/api/sync", syncV1Router);
   app.use("/api/invoices", invoiceRouter);
   app.use("/api/accounting", accountingRouter);
   app.use("/api/inventory", inventoryRouter);
@@ -197,9 +200,11 @@ async function startServer() {
   app.use("/api/consolidation", consolidationRouter);
   app.use("/api/replication", replicationRouter);
   app.use("/api/saas", saasRouter);
+  app.use("/api/platform", platformRouter);
   app.use("/api/ai", aiRouter);
   app.use("/api/organization", organizationRouter);
   app.use("/api/rbac", rbacRouter);
+  app.use("/api/reports", reportingRouter);
 
   // Enterprise SaaS Gateway - API Keys Auth Helper
   const validateSaasApiKey = (requiredScope: string) => {

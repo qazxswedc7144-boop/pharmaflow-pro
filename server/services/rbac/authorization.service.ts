@@ -94,12 +94,23 @@ export class AuthorizationService {
 
     const roleUpper = (user.role || '').toUpperCase().trim();
 
-    // 1. Super Admin bypass
+    // 1. Platform Owner Wildcard Access
     if (roleUpper === 'PLATFORM_OWNER' || roleUpper === 'SUPER_ADMIN') {
       return { allowed: true, reason: "Platform Owner Wildcard Access (*)" };
     }
 
-    // 2. Tenant Admin
+    // 2. Strict Platform Domain Protection: Any platform.* permission requires PLATFORM_OWNER or explicit override
+    if (permissionKey.startsWith('platform.')) {
+      // Check if user has explicit override or explicit permission in claims
+      if (user.permissions && Array.isArray(user.permissions)) {
+        if (user.permissions.includes('*') || user.permissions.includes(permissionKey)) {
+          return { allowed: true, reason: "Platform permission present in user claims token" };
+        }
+      }
+      return { allowed: false, reason: "Access Denied: Platform control plane operations are reserved exclusively for Platform Owners" };
+    }
+
+    // 3. Tenant Admin Full Authority within their own tenant
     if (roleUpper === 'TENANT_ADMIN' || roleUpper === 'OWNER') {
       if (context?.tenantId && user.tenantId && context.tenantId !== user.tenantId) {
         return { allowed: false, reason: "Cross-tenant access forbidden" };

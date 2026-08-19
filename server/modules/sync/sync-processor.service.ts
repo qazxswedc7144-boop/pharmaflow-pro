@@ -16,6 +16,25 @@ import { SyncChangelogService } from "./sync-changelog.service";
 import { SyncAuditService } from "./sync-audit.service";
 import { AuthorizationService } from "../../services/rbac/authorization.service";
 
+const KNOWN_ENTITIES = new Set([
+  "INVOICE",
+  "SALE",
+  "PRODUCT",
+  "PAYMENT",
+  "VOUCHER",
+  "JOURNAL_ENTRY",
+  "INVENTORY_MOVEMENT",
+  "STOCK_ADJUSTMENT",
+  "INVENTORY_BATCH",
+  "BRANCH_TRANSFER",
+  "STOCK_TRANSFER",
+  "TRANSFER",
+  "CUSTOMER",
+  "SUPPLIER",
+  "SETTINGS",
+  "DEVICE"
+]);
+
 export class SyncProcessorService {
   /**
    * Main synchronization mutation batch processor
@@ -32,6 +51,7 @@ export class SyncProcessorService {
     const results: PerMutationResult[] = [];
 
     const summary = {
+      applied: [] as string[],
       successful: [] as string[],
       duplicates: [] as string[],
       conflicts: [] as string[],
@@ -54,13 +74,17 @@ export class SyncProcessorService {
 
       return {
         success: false,
+        errorCode: "SCHEMA_VERSION_MISMATCH",
+        error: `إصدار بروتوكول المزامنة غير متطابق. المطلوب: ${SYNC_PROTOCOL_VERSION}، المرسل: ${envelope.schemaVersion}`,
         tenantId: authenticatedTenantId,
         branchId: envelope.branchId,
         serverTimestamp,
-        processedCount: 0,
+        processedCount: (envelope.mutations || []).length,
         results: (envelope.mutations || []).map((m) => ({
+          id: m.id,
           mutationId: m.id,
           status: "REJECTED",
+          success: false,
           errorCode: "SCHEMA_VERSION_MISMATCH",
           message: `إصدار بروتوكول المزامنة غير متطابق. المطلوب: ${SYNC_PROTOCOL_VERSION}، المرسل: ${envelope.schemaVersion}`
         })),
@@ -70,8 +94,7 @@ export class SyncProcessorService {
 
     // 2. STRICT TENANT SEGREGATION & MISMATCH DETECTION
     // Server MUST NEVER trust client-provided tenantId alone.
-    const requestedTenantId = envelope.tenantId || authenticatedTenantId;
-    if (requestedTenantId !== authenticatedTenantId && authenticatedTenantId !== "default-tenant") {
+    if (envelope.tenantId && envelope.tenantId !== authenticatedTenantId) {
       await SyncAuditService.logEvent({
         tenantId: authenticatedTenantId,
         branchId: envelope.branchId,
@@ -79,19 +102,23 @@ export class SyncProcessorService {
         deviceId: envelope.deviceId,
         operation: "TENANT_MISMATCH",
         result: "FAILURE",
-        error: `Tenant mismatch detected. Authenticated: ${authenticatedTenantId}, Requested: ${requestedTenantId}`,
+        error: `Tenant mismatch detected. Authenticated: ${authenticatedTenantId}, Requested: ${envelope.tenantId}`,
         metadata: { envelopeTenant: envelope.tenantId }
       });
 
       return {
         success: false,
+        errorCode: "TENANT_MISMATCH",
+        error: "انتهاك عزل المنشآت: معرف المنشأة في حزمة المزامنة لا يطابق جلسة المصادقة المعتمدة.",
         tenantId: authenticatedTenantId,
         branchId: envelope.branchId,
         serverTimestamp,
-        processedCount: 0,
+        processedCount: (envelope.mutations || []).length,
         results: (envelope.mutations || []).map((m) => ({
+          id: m.id,
           mutationId: m.id,
           status: "REJECTED",
+          success: false,
           errorCode: "TENANT_MISMATCH",
           message: "انتهاك عزل المنشآت: معرف المنشأة في حزمة المزامنة لا يطابق جلسة المصادقة المعتمدة."
         })),
@@ -119,13 +146,17 @@ export class SyncProcessorService {
 
         return {
           success: false,
+          errorCode: "BRANCH_ACCESS_DENIED",
+          error: `غير مصرح للجهاز أو المستخدم بإرسال مزامنة للفرع [${targetBranchId}].`,
           tenantId,
           branchId: targetBranchId,
           serverTimestamp,
-          processedCount: 0,
+          processedCount: (envelope.mutations || []).length,
           results: (envelope.mutations || []).map((m) => ({
+            id: m.id,
             mutationId: m.id,
             status: "UNAUTHORIZED",
+            success: false,
             errorCode: "BRANCH_ACCESS_DENIED",
             message: `غير مصرح للجهاز أو المستخدم بإرسال مزامنة للفرع [${targetBranchId}].`
           })),
@@ -137,6 +168,7 @@ export class SyncProcessorService {
     // 4. DEVICE VERIFICATION & REVOCATION ENFORCEMENT
     const deviceVerification = await DeviceService.verifyDevice(tenantId, envelope.deviceId);
     if (!deviceVerification.allowed) {
+      const errCode = deviceVerification.status === "REVOKED" ? "DEVICE_REVOKED" : "DEVICE_SUSPENDED";
       await SyncAuditService.logEvent({
         tenantId,
         branchId: targetBranchId,
@@ -150,14 +182,18 @@ export class SyncProcessorService {
 
       return {
         success: false,
+        errorCode: errCode,
+        error: deviceVerification.reason || "الجهاز ملغى أو معلق من قبل إدارة الأمن.",
         tenantId,
         branchId: targetBranchId,
         serverTimestamp,
-        processedCount: 0,
+        processedCount: (envelope.mutations || []).length,
         results: (envelope.mutations || []).map((m) => ({
+          id: m.id,
           mutationId: m.id,
           status: "REJECTED",
-          errorCode: deviceVerification.status === "REVOKED" ? "DEVICE_REVOKED" : "DEVICE_SUSPENDED",
+          success: false,
+          errorCode: errCode,
           message: deviceVerification.reason || "الجهاز ملغى أو معلق من قبل إدارة الأمن."
         })),
         summary
@@ -179,6 +215,37 @@ export class SyncProcessorService {
       console.warn("[SyncProcessor] Could not resolve RBAC permissions, using role fallback:", err.message);
     }
 
+    // Role-based baseline permissions fallback:
+    if (authenticatedUserRole === "CASHIER") {
+      effectivePermissions.add("invoices.create");
+      effectivePermissions.add("invoices.update");
+      effectivePermissions.add("sales.invoice.create");
+      effectivePermissions.add("sales.invoice.update");
+      effectivePermissions.add("sales.pos.access");
+      effectivePermissions.add("accounting.voucher.create");
+      effectivePermissions.add("accounting.vouchers.manage");
+      effectivePermissions.add("customers.manage");
+    } else if (["ADMIN", "PLATFORM_OWNER", "TENANT_ADMIN", "PHARMACIST_IN_CHARGE", "PHARMACIST", "BRANCH_MANAGER", "SUPER_ADMIN"].includes(authenticatedUserRole || "")) {
+      effectivePermissions.add("invoices.create");
+      effectivePermissions.add("invoices.update");
+      effectivePermissions.add("sales.invoice.create");
+      effectivePermissions.add("sales.invoice.update");
+      effectivePermissions.add("sales.pos.access");
+      effectivePermissions.add("inventory.products.manage");
+      effectivePermissions.add("inventory.product.create");
+      effectivePermissions.add("inventory.product.update");
+      effectivePermissions.add("inventory.product.view");
+      effectivePermissions.add("inventory.movements.create");
+      effectivePermissions.add("inventory.batch.manage");
+      effectivePermissions.add("inventory.transfers.manage");
+      effectivePermissions.add("accounting.vouchers.manage");
+      effectivePermissions.add("accounting.voucher.create");
+      effectivePermissions.add("accounting.journal.post");
+      effectivePermissions.add("accounting.journal.create");
+      effectivePermissions.add("customers.manage");
+      effectivePermissions.add("suppliers.manage");
+    }
+
     const mutations = Array.isArray(envelope.mutations) ? envelope.mutations : [];
 
     // 6. PROCESS EACH MUTATION WITH PARTIAL FAILURE ISOLATION
@@ -187,8 +254,10 @@ export class SyncProcessorService {
 
       if (!mutationId || !entity || !idempotencyKey) {
         const invalidRes: PerMutationResult = {
+          id: mutationId || `invalid-${Math.random()}`,
           mutationId: mutationId || `invalid-${Math.random()}`,
           status: "INVALID",
+          success: false,
           errorCode: "MALFORMED_MUTATION",
           message: "حقول المعاملة ناقصة (mutationId, entity, or idempotencyKey required)."
         };
@@ -197,14 +266,46 @@ export class SyncProcessorService {
         continue;
       }
 
+      // Check entity support
+      if (!KNOWN_ENTITIES.has(entity.toUpperCase())) {
+        const unsuppRes: PerMutationResult = {
+          id: mutationId,
+          mutationId,
+          status: "REJECTED",
+          success: false,
+          errorCode: "UNSUPPORTED_ENTITY",
+          message: `الكيان [${entity}] غير مدعوم في بروتوكول المزامنة.`
+        };
+        results.push(unsuppRes);
+        summary.rejected.push(mutationId);
+        continue;
+      }
+
       // 6.1. RBAC PERMISSION CHECK PER ENTITY & OPERATION
       const requiredPermission = this.getRequiredPermission(entity, operation);
-      const isPrivileged = ["ADMIN", "PLATFORM_OWNER", "TENANT_ADMIN"].includes(authenticatedUserRole || "");
+      const isPrivileged = ["ADMIN", "PLATFORM_OWNER", "TENANT_ADMIN", "PHARMACIST_IN_CHARGE", "SUPER_ADMIN"].includes(authenticatedUserRole || "");
       
-      if (requiredPermission && !isPrivileged && !effectivePermissions.has(requiredPermission)) {
+      const isAuditor = authenticatedUserRole === "AUDITOR";
+      if (isAuditor) {
         const unauthRes: PerMutationResult = {
+          id: mutationId,
           mutationId,
           status: "UNAUTHORIZED",
+          success: false,
+          errorCode: "READ_ONLY_ROLE",
+          message: "دور المدقق المالي يملك صلاحيات القراءة فقط ولا يسمح له بإرسال تعديلات مزامنة."
+        };
+        results.push(unauthRes);
+        summary.unauthorized.push(mutationId);
+        continue;
+      }
+
+      if (requiredPermission && !isPrivileged && !effectivePermissions.has(requiredPermission)) {
+        const unauthRes: PerMutationResult = {
+          id: mutationId,
+          mutationId,
+          status: "UNAUTHORIZED",
+          success: false,
           errorCode: "PERMISSION_DENIED",
           message: `المستخدم لا يملك الصلاحية المطلوبة [${requiredPermission}] لتنفيذ العملية على [${entity}].`
         };
@@ -234,10 +335,16 @@ export class SyncProcessorService {
       );
 
       if (idempotencyCheck.isDuplicate) {
-        const duplicateRes: PerMutationResult = idempotencyCheck.previousResult || {
+        const duplicateRes: PerMutationResult = {
+          ...(idempotencyCheck.previousResult || {
+            mutationId,
+            status: "DUPLICATE",
+            message: "تم تنفيذ هذه المعاملة مسبقاً بنجاح (Idempotent Replay Protected)."
+          }),
+          id: mutationId,
           mutationId,
           status: "DUPLICATE",
-          message: "تم تنفيذ هذه المعاملة مسبقاً بنجاح (Idempotent Replay Protected)."
+          success: true
         };
         results.push(duplicateRes);
         summary.duplicates.push(mutationId);
@@ -266,33 +373,35 @@ export class SyncProcessorService {
           version: version || 1
         });
 
-        results.push(mutationResult);
+        const fullResult: PerMutationResult = {
+          ...mutationResult,
+          id: mutationId,
+          mutationId
+        };
 
-        if (mutationResult.status === "SUCCESS") {
+        results.push(fullResult);
+
+        if (fullResult.status === "SUCCESS") {
           summary.successful.push(mutationId);
-          // Cache successful result in idempotency manager
-          SyncIdempotencyService.record(
-            tenantId,
-            envelope.deviceId,
-            idempotencyKey,
-            payload,
-            mutationResult
-          );
+          summary.applied.push(mutationId);
 
-          // Append to server-side change log for delta sync down to other devices
-          await SyncChangelogService.recordChange({
+          // Record in Idempotency cache
+          SyncIdempotencyService.record(tenantId, envelope.deviceId, idempotencyKey, payload, fullResult);
+
+          // Append to authoritative Changelog for downstream delta distribution
+          SyncChangelogService.recordChange({
             tenantId,
             branchId: targetBranchId,
             entity,
-            entityId: entityId || (payload?.id as string) || mutationId,
+            entityId: entityId || mutationId,
             operation,
-            version: mutationResult.serverVersion || 1,
+            version: fullResult.serverVersion || (version || 1) + 1,
             mutationId,
             actorId: authenticatedUserId,
             deviceId: envelope.deviceId,
             payload: payload || {}
           });
-        } else if (mutationResult.status === "CONFLICT") {
+        } else if (fullResult.status === "CONFLICT") {
           summary.conflicts.push(mutationId);
           await SyncAuditService.logEvent({
             tenantId,
@@ -302,21 +411,26 @@ export class SyncProcessorService {
             mutationId,
             operation: "SYNC_CONFLICT",
             result: "WARNING",
-            error: mutationResult.conflict?.message,
-            metadata: { conflict: mutationResult.conflict }
+            error: fullResult.conflict?.message || "Conflict detected",
+            metadata: {
+              category: fullResult.conflict?.category,
+              resolutionStrategy: fullResult.conflict?.resolutionStrategy
+            }
           });
         } else {
           summary.rejected.push(mutationId);
         }
-
       } catch (err: any) {
-        const failureRes: PerMutationResult = {
+        console.error(`[SyncProcessor] Mutation ${mutationId} fatal error:`, err);
+        const failRes: PerMutationResult = {
+          id: mutationId,
           mutationId,
-          status: "RETRY",
+          status: "REJECTED",
+          success: false,
           errorCode: "PROCESSING_EXCEPTION",
-          message: err.message || "فشل أثناء المعالجة في الخادم، قابل لإعادة المحاولة."
+          message: err.message || "فشل غير متوقع أثناء معالجة المعاملة."
         };
-        results.push(failureRes);
+        results.push(failRes);
         summary.rejected.push(mutationId);
       }
     }
@@ -328,7 +442,7 @@ export class SyncProcessorService {
       userId: authenticatedUserId,
       deviceId: envelope.deviceId,
       operation: "SYNC_PUSH",
-      result: summary.successful.length > 0 ? "SUCCESS" : "WARNING",
+      result: summary.successful.length > 0 || summary.duplicates.length > 0 ? "SUCCESS" : "WARNING",
       metadata: {
         totalMutations: mutations.length,
         successfulCount: summary.successful.length,
@@ -339,11 +453,11 @@ export class SyncProcessorService {
     });
 
     return {
-      success: true,
+      success: summary.rejected.length === 0 && summary.unauthorized.length === 0,
       tenantId,
       branchId: targetBranchId,
       serverTimestamp,
-      processedCount: summary.successful.length + summary.duplicates.length,
+      processedCount: results.length,
       results,
       summary
     };
@@ -356,18 +470,21 @@ export class SyncProcessorService {
     switch (entity.toUpperCase()) {
       case "INVOICE":
       case "SALE":
-        return operation === "CREATE" || operation === "POST" ? "invoices.create" : "invoices.update";
+        return operation === "CREATE" || operation === "POST" ? "sales.invoice.create" : "sales.invoice.update";
       case "PRODUCT":
         return "inventory.products.manage";
       case "PAYMENT":
       case "VOUCHER":
-        return "accounting.vouchers.manage";
+        return "accounting.voucher.create";
       case "JOURNAL_ENTRY":
         return "accounting.journal.post";
       case "INVENTORY_MOVEMENT":
       case "STOCK_ADJUSTMENT":
+      case "INVENTORY_BATCH":
         return "inventory.movements.create";
       case "BRANCH_TRANSFER":
+      case "STOCK_TRANSFER":
+      case "TRANSFER":
         return "inventory.transfers.manage";
       case "CUSTOMER":
         return "customers.manage";
@@ -433,8 +550,10 @@ export class SyncProcessorService {
         });
 
         return {
+          id: mutationId,
           mutationId,
           status: "CONFLICT",
+          success: false,
           errorCode: conflictCheck.category,
           conflict: {
             category: conflictCheck.category || "SAME_RECORD_CONFLICT",
@@ -483,8 +602,10 @@ export class SyncProcessorService {
       }
 
       return {
+        id: mutationId,
         mutationId,
         status: "SUCCESS",
+        success: true,
         serverVersion: version + 1,
         processedAt: new Date().toISOString()
       };
@@ -508,8 +629,10 @@ export class SyncProcessorService {
 
       if (conflictCheck.hasConflict) {
         return {
+          id: mutationId,
           mutationId,
           status: "CONFLICT",
+          success: false,
           errorCode: conflictCheck.category,
           conflict: {
             category: conflictCheck.category || "VERSION_CONFLICT",
@@ -525,39 +648,35 @@ export class SyncProcessorService {
         await prisma.product.upsert({
           where: { id: entityId },
           update: {
-            name: data.name,
-            barcode: data.barcode,
-            categoryId: data.categoryId,
-            supplierId: data.supplierId,
-            stock: data.stock !== undefined ? data.stock : undefined,
-            is_active: data.is_active !== undefined ? data.is_active : true,
+            name: data.name || "Product",
+            sku: data.sku || data.barcode || `SKU-${Date.now()}`,
+            basePrice: data.basePrice || data.price || 0,
+            costPrice: data.costPrice || data.cost || 0,
             updatedAt: new Date()
           },
           create: {
             id: entityId,
-            name: data.name || "Unnamed Product",
-            barcode: data.barcode || "",
-            categoryId: data.categoryId,
-            supplierId: data.supplierId,
-            stock: data.stock || 0,
-            is_active: data.is_active !== undefined ? data.is_active : true,
+            name: data.name || "Product",
+            sku: data.sku || data.barcode || `SKU-${Date.now()}`,
+            basePrice: data.basePrice || data.price || 0,
+            costPrice: data.costPrice || data.cost || 0,
             tenantId
           }
-        }).catch((err) => {
-          console.warn("[SyncProcessor] Product write warning:", err.message);
-        });
+        }).catch((err) => console.warn("[SyncProcessor] Product write warning:", err.message));
       }
 
       return {
+        id: mutationId,
         mutationId,
         status: "SUCCESS",
+        success: true,
         serverVersion: version + 1,
         processedAt: new Date().toISOString()
       };
     }
 
-    // 3. PAYMENT / EXPENSE / JOURNAL EXECUTION (FINANCIAL ENTITIES)
-    if (["PAYMENT", "EXPENSE", "JOURNAL_ENTRY"].includes(entity)) {
+    // 3. FINANCIAL & INVENTORY WRITE HANDLERS
+    if (["PAYMENT", "JOURNAL_ENTRY", "INVENTORY_MOVEMENT", "INVENTORY_BATCH"].includes(entity)) {
       if (prisma.isConnected && prisma.isConnected()) {
         if (entity === "PAYMENT") {
           await prisma.payment.upsert({
@@ -602,8 +721,10 @@ export class SyncProcessorService {
       }
 
       return {
+        id: mutationId,
         mutationId,
         status: "SUCCESS",
+        success: true,
         serverVersion: version + 1,
         processedAt: new Date().toISOString()
       };
@@ -611,8 +732,10 @@ export class SyncProcessorService {
 
     // 4. GENERIC ENTITY FALLBACK (e.g. CUSTOMER, SUPPLIER, TRANSFER)
     return {
+      id: mutationId,
       mutationId,
       status: "SUCCESS",
+      success: true,
       serverVersion: version + 1,
       processedAt: new Date().toISOString()
     };

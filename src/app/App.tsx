@@ -975,7 +975,7 @@ function MainLayout() {
                   case 'reports/sales-by-item': return <RoleGuard permission="VIEW_REPORTS"><SalesByItemReport onNavigate={handleNav} /></RoleGuard>;
                   case 'reports/item-movement-details': return <RoleGuard permission="VIEW_REPORTS"><ItemMovementDetailsReport onNavigate={handleNav} /></RoleGuard>;
                   case 'reports/expiry-items': return <RoleGuard permission="VIEW_REPORTS"><ExpiryItemsReport onNavigate={handleNav} /></RoleGuard>;
-                  case 'reports/financial-engine': return <RoleGuard permission="VIEW_REPORTS"><FinancialEngineReport onNavigate={handleNav} /></RoleGuard>;
+                  case 'reports/financial-engine': return <RoleGuard permission="VIEW_REPORTS"><FinancialEngineReport onNavigate={handleNav} initialTab={viewParams?.tab} initialCategory={viewParams?.category} /></RoleGuard>;
                   
                   case 'login': return <LoginPage onSuccess={() => handleNav('dashboard')} />;
                   case 'backup': return <ProtectedRoute permission="MANAGE_SYSTEM"><BackupManagement /></ProtectedRoute>;

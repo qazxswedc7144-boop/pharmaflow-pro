@@ -88,6 +88,20 @@ export class DeviceService {
   }
 
   /**
+   * Retrieves device record
+   */
+  static async getDevice(tenantId: string, deviceId: string): Promise<DeviceIdentity | (DeviceIdentity & { lastSeen: string }) | null> {
+    const cacheKey = this.getCacheKey(tenantId, deviceId);
+    const dev = this.deviceCache.get(cacheKey);
+    if (!dev) return null;
+    const lastSeenStr = dev.lastSeenAt instanceof Date ? dev.lastSeenAt.toISOString() : String(dev.lastSeenAt || new Date().toISOString());
+    return {
+      ...dev,
+      lastSeen: lastSeenStr
+    };
+  }
+
+  /**
    * Verifies if a device is allowed to synchronize
    */
   static async verifyDevice(tenantId: string, deviceId: string): Promise<{
@@ -126,11 +140,11 @@ export class DeviceService {
       }
     }
 
-    // If device is completely unknown, auto-register it in ACTIVE state for seamless onboarding
+    // If device is completely unknown, return UNKNOWN with allowed grace
     if (!device) {
       return {
         allowed: true,
-        status: "ACTIVE"
+        status: "UNKNOWN"
       };
     }
 
@@ -172,6 +186,13 @@ export class DeviceService {
   }
 
   /**
+   * Records heartbeat explicitly
+   */
+  static async recordHeartbeat(tenantId: string, deviceId: string): Promise<void> {
+    this.touchDevice(tenantId, deviceId);
+  }
+
+  /**
    * Updates device operational status (e.g. security revocation or suspension)
    */
   static async updateDeviceStatus(
@@ -204,6 +225,8 @@ export class DeviceService {
     } else if (status === "ACTIVE") {
       device.revokedAt = null;
       device.revocationReason = null;
+    } else if (status === "SUSPENDED") {
+      device.revocationReason = reason || "Suspension Policy";
     }
 
     this.deviceCache.set(cacheKey, device);
@@ -211,12 +234,30 @@ export class DeviceService {
   }
 
   /**
-   * List all registered devices for a given tenant
+   * Quick security check for device authorization
+   */
+  static getDeviceSecurityStatus(tenantId: string, deviceId: string): { isAuthorized: boolean; status: DeviceStatus; reason?: string } {
+    const cacheKey = this.getCacheKey(tenantId, deviceId);
+    const device = this.deviceCache.get(cacheKey);
+    if (!device) {
+      return { isAuthorized: true, status: "ACTIVE" };
+    }
+    if (device.status === "REVOKED") {
+      return { isAuthorized: false, status: "REVOKED", reason: device.revocationReason || "Revoked by Administrator" };
+    }
+    if (device.status === "SUSPENDED") {
+      return { isAuthorized: false, status: "SUSPENDED", reason: device.revocationReason || "Suspended by Administrator" };
+    }
+    return { isAuthorized: true, status: "ACTIVE" };
+  }
+
+  /**
+   * List all registered devices for a given tenant or all tenants if '*'
    */
   static getTenantDevices(tenantId: string): DeviceIdentity[] {
     const devices: DeviceIdentity[] = [];
     for (const [key, dev] of this.deviceCache.entries()) {
-      if (key.startsWith(`${tenantId}:`)) {
+      if (tenantId === '*' || key.startsWith(`${tenantId}:`)) {
         devices.push(dev);
       }
     }

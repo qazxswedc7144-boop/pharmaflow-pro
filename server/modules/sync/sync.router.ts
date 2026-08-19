@@ -9,6 +9,7 @@ import { SyncChangelogService } from "./sync-changelog.service";
 import { DeviceService } from "./device.service";
 import { SyncConflictService } from "./sync-conflict.service";
 import { SyncAuditService } from "./sync-audit.service";
+import { SyncMetricsService } from "./sync-metrics.service";
 import { SyncEnvelope, SyncPullRequest, SYNC_PROTOCOL_VERSION } from "./sync.types";
 import { prisma } from "../../database/prisma";
 
@@ -19,7 +20,7 @@ syncRouter.use(authenticateToken);
 syncRouter.use(tenantContextMiddleware);
 
 /**
- * GET /api/v1/sync/status
+ * GET /status (or /api/v1/sync/status)
  * Dynamic health and pipeline diagnostics for the synchronization engine.
  */
 syncRouter.get("/status", async (req: Request, res: Response): Promise<void> => {
@@ -28,6 +29,7 @@ syncRouter.get("/status", async (req: Request, res: Response): Promise<void> => 
     const tenantId = authReq.user?.tenantId || "default-tenant";
     const currentCursor = SyncChangelogService.getCurrentCursor();
     const openConflicts = SyncConflictService.getConflicts(tenantId).length;
+    const metrics = SyncMetricsService.getMetrics(tenantId);
 
     res.status(200).json({
       status: "healthy",
@@ -42,7 +44,11 @@ syncRouter.get("/status", async (req: Request, res: Response): Promise<void> => 
       metrics: {
         currentCursor,
         openConflicts,
-        systemLatency: "OK"
+        systemLatency: "OK",
+        mutationsProcessed: metrics.mutationsProcessed,
+        duplicatesCount: metrics.duplicatesCount,
+        conflictsCount: metrics.conflictsCount,
+        lastSuccessfulSync: metrics.lastSuccessfulSync
       }
     });
   } catch (error: any) {
@@ -51,17 +57,38 @@ syncRouter.get("/status", async (req: Request, res: Response): Promise<void> => 
 });
 
 /**
- * POST /api/v1/sync/push
+ * GET /metrics
+ * Structured synchronization metrics and observability
+ */
+syncRouter.get("/metrics", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const tenantId = authReq.user?.tenantId || "default-tenant";
+    const snapshot = SyncMetricsService.getMetrics(tenantId);
+
+    res.status(200).json({
+      success: true,
+      data: snapshot
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /push (or /api/v1/sync/push)
  * Batch processing of mutations with strict tenant, branch, device, idempotency, and RBAC enforcement.
  */
 syncRouter.post("/push", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const authReq = req as AuthenticatedRequest;
-    const authenticatedTenantId = authReq.user?.tenantId || "default-tenant";
-    const authenticatedUserId = authReq.user?.userId || "system";
-    const authenticatedUserRole = authReq.user?.role as string | undefined;
+  const startTime = Date.now();
+  const authReq = req as AuthenticatedRequest;
+  const authenticatedTenantId = authReq.user?.tenantId || "default-tenant";
+  const authenticatedUserId = authReq.user?.userId || "system";
+  const authenticatedUserRole = authReq.user?.role as string | undefined;
 
+  try {
     const rawBody = req.body || {};
+    const rawBytes = JSON.stringify(rawBody).length;
     
     // Normalize into SyncEnvelope structure
     const envelope: SyncEnvelope = {
@@ -83,8 +110,33 @@ syncRouter.post("/push", async (req: Request, res: Response): Promise<void> => {
       authenticatedUserRole
     });
 
+    const durationMs = Date.now() - startTime;
+    SyncMetricsService.recordPushMetrics({
+      tenantId: authenticatedTenantId,
+      durationMs,
+      processedCount: response.processedCount,
+      failedCount: response.summary.rejected.length + response.summary.unauthorized.length,
+      duplicateCount: response.summary.duplicates.length,
+      conflictCount: response.summary.conflicts.length,
+      payloadBytes: rawBytes,
+      success: response.success
+    });
+
     res.status(response.success ? 200 : 400).json(response);
   } catch (error: any) {
+    const durationMs = Date.now() - startTime;
+    SyncMetricsService.recordPushMetrics({
+      tenantId: authenticatedTenantId,
+      durationMs,
+      processedCount: 0,
+      failedCount: 1,
+      duplicateCount: 0,
+      conflictCount: 0,
+      payloadBytes: 0,
+      success: false,
+      error: error.message
+    });
+
     res.status(500).json({
       success: false,
       error: error.message || "Internal sync processing error"
@@ -93,14 +145,15 @@ syncRouter.post("/push", async (req: Request, res: Response): Promise<void> => {
 });
 
 /**
- * POST /api/v1/sync/pull & GET /api/v1/sync/pull
+ * POST /pull & GET /pull
  * Incremental, cursor-based delta synchronization pulling downstream updates isolated by tenant & branch.
  */
 const handlePull = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const authReq = req as AuthenticatedRequest;
-    const authenticatedTenantId = authReq.user?.tenantId || "default-tenant";
+  const startTime = Date.now();
+  const authReq = req as AuthenticatedRequest;
+  const authenticatedTenantId = authReq.user?.tenantId || "default-tenant";
 
+  try {
     const bodyOrQuery = req.method === "GET" ? req.query : req.body;
     const pullRequest: SyncPullRequest = {
       cursor: bodyOrQuery.cursor,
@@ -158,7 +211,7 @@ const handlePull = async (req: Request, res: Response): Promise<void> => {
       }
     });
 
-    res.status(200).json({
+    const responsePayload = {
       success: true,
       tenantId: authenticatedTenantId,
       branchId: pullRequest.branchId,
@@ -171,8 +224,29 @@ const handlePull = async (req: Request, res: Response): Promise<void> => {
         products: dbProducts,
         invoices: dbInvoices
       }
+    };
+
+    const durationMs = Date.now() - startTime;
+    SyncMetricsService.recordPullMetrics({
+      tenantId: authenticatedTenantId,
+      durationMs,
+      changesReturned: changelogDelta.changes.length,
+      responseBytes: JSON.stringify(responsePayload).length,
+      success: true
     });
+
+    res.status(200).json(responsePayload);
   } catch (error: any) {
+    const durationMs = Date.now() - startTime;
+    SyncMetricsService.recordPullMetrics({
+      tenantId: authenticatedTenantId,
+      durationMs,
+      changesReturned: 0,
+      responseBytes: 0,
+      success: false,
+      error: error.message
+    });
+
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -181,7 +255,7 @@ syncRouter.post("/pull", handlePull);
 syncRouter.get("/pull", handlePull);
 
 /**
- * POST /api/v1/sync/device/register
+ * POST /device/register
  * Secure Device Registration Endpoint
  */
 syncRouter.post("/device/register", async (req: Request, res: Response): Promise<void> => {
@@ -227,7 +301,49 @@ syncRouter.post("/device/register", async (req: Request, res: Response): Promise
 });
 
 /**
- * GET /api/v1/sync/device/:deviceId/status
+ * POST /device/revoke
+ * Endpoint to revoke or disable a compromised/lost device
+ */
+syncRouter.post("/device/revoke", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const authenticatedTenantId = authReq.user?.tenantId || "default-tenant";
+    const { deviceId, reason } = req.body;
+
+    if (!deviceId) {
+      res.status(400).json({ success: false, error: "deviceId is required for device revocation." });
+      return;
+    }
+
+    const updated = await DeviceService.updateDeviceStatus(
+      authenticatedTenantId,
+      deviceId,
+      "REVOKED",
+      reason || "Security Revocation"
+    );
+
+    await SyncAuditService.logEvent({
+      tenantId: authenticatedTenantId,
+      userId: authReq.user?.userId,
+      deviceId,
+      operation: "DEVICE_REVOKED",
+      result: "SUCCESS",
+      error: reason,
+      metadata: { newStatus: "REVOKED" }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Device [${deviceId}] successfully revoked.`,
+      data: updated
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /device/:deviceId/status
  * Check device registration and authorization status
  */
 syncRouter.get("/device/:deviceId/status", async (req: Request, res: Response): Promise<void> => {
@@ -247,8 +363,8 @@ syncRouter.get("/device/:deviceId/status", async (req: Request, res: Response): 
 });
 
 /**
- * POST /api/v1/sync/device/:deviceId/status
- * Security admin action to revoke, suspend, or activate a device
+ * POST /device/:deviceId/status
+ * Security admin action to update status of a device (ACTIVE / REVOKED / SUSPENDED)
  */
 syncRouter.post("/device/:deviceId/status", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -284,7 +400,7 @@ syncRouter.post("/device/:deviceId/status", async (req: Request, res: Response):
 });
 
 /**
- * GET /api/v1/sync/conflicts
+ * GET /conflicts
  * Retrieve open conflicts for the tenant and branch
  */
 syncRouter.get("/conflicts", async (req: Request, res: Response): Promise<void> => {
@@ -304,7 +420,7 @@ syncRouter.get("/conflicts", async (req: Request, res: Response): Promise<void> 
 });
 
 /**
- * POST /api/v1/sync/conflicts/:conflictId/resolve
+ * POST /conflicts/:conflictId/resolve
  * Resolve conflict manually via management workflow
  */
 syncRouter.post("/conflicts/:conflictId/resolve", async (req: Request, res: Response): Promise<void> => {
@@ -334,7 +450,7 @@ syncRouter.post("/conflicts/:conflictId/resolve", async (req: Request, res: Resp
 });
 
 /**
- * GET /api/v1/sync/audit-logs
+ * GET /audit-logs
  * Query synchronization security audit records
  */
 syncRouter.get("/audit-logs", async (req: Request, res: Response): Promise<void> => {
@@ -355,7 +471,7 @@ syncRouter.get("/audit-logs", async (req: Request, res: Response): Promise<void>
 });
 
 /**
- * POST /api/v1/sync/ack
+ * POST /ack
  * Acknowledge receipt of pull deltas
  */
 syncRouter.post("/ack", async (req: Request, res: Response): Promise<void> => {
