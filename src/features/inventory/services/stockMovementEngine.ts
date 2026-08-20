@@ -15,9 +15,9 @@ export class StockMovementEngine {
     await PeriodLockEngine.validateOperation(date, 'تعديل المخزون');
 
     // Check if item exists in Dexie or auto-register missing product
-    let product = await db.products.get(data.item_id);
+    let product = await db.products.get(data.item_id).catch(() => null);
     if (!product && data.item_id) {
-      product = await db.products.where('ProductID').equals(data.item_id).first();
+      product = await db.products.where('ProductID').equals(data.item_id).first().catch(() => null);
     }
 
     if (!product) {
@@ -176,6 +176,15 @@ export class StockMovementEngine {
         
         await db.stock_movements.delete(movement.id);
       }
+
+      // Reverse medicine batches associated with this purchase invoice
+      const batches = await db.medicineBatches
+        .filter((b: any) => b.sourceInvoiceId === reference_id || b.reference_id === reference_id)
+        .toArray()
+        .catch(() => []);
+      for (const b of batches) {
+        await db.medicineBatches.delete(b.id);
+      }
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new Error(`Reverse Movements Error: ${errMsg}`);
@@ -213,6 +222,39 @@ export class StockMovementEngine {
         } else {
           // Purchase: Increase stock
           await this.recordPurchaseMovement(itemId, qty, price, invoiceId);
+
+          // Record pharmaceutical inventory batch
+          if (item.expiryDate || item.batchNumber || item.batchId) {
+            try {
+              const expDate = String(item.expiryDate || '');
+              const batchNum = String(item.batchNumber || item.batchId || (expDate ? `B-${expDate.replace(/[^0-9]/g, '')}` : `BATCH-${invoiceId.slice(-4)}`));
+              const batchId = item.batchId || `BATCH_${invoiceId}_${itemId}_${batchNum}`;
+              const existingBatch = await db.medicineBatches.get(batchId).catch(() => null);
+
+              const batchRecord = {
+                id: batchId,
+                batchId: batchNum,
+                batchNumber: batchNum,
+                productId: itemId,
+                quantity: existingBatch ? (existingBatch.quantity || 0) + qty : qty,
+                expiryDate: expDate || existingBatch?.expiryDate || '',
+                unitCost: price,
+                cost: price,
+                sourceInvoiceId: invoiceId,
+                reference_id: invoiceId,
+                tenantId: 'TEN-DEV-001',
+                tenant_id: 'TEN-DEV-001',
+                branchId: 'BR-MAIN',
+                branch_id: 'BR-MAIN',
+                created_at: existingBatch?.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                lastModified: new Date().toISOString()
+              };
+              await db.medicineBatches.put(batchRecord);
+            } catch (batchErr) {
+              console.warn("Failed to persist medicine batch:", batchErr);
+            }
+          }
         }
       }
     }

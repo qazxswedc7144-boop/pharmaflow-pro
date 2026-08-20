@@ -412,13 +412,13 @@ const BackupManagement: React.FC = () => {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Action Header */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="md:col-span-3 !p-6 bg-gradient-to-br from-slate-900 to-slate-800 text-white border-none shadow-xl relative overflow-hidden">
+        <Card className="md:col-span-3 !p-6 bg-gradient-to-r from-[#0A3D3A] via-[#0F4F4C] to-[#14534F] text-white border border-emerald-800/40 rounded-2xl sm:rounded-3xl shadow-xl relative overflow-hidden">
             <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="space-y-2 text-center md:text-right">
-                <h3 className="text-xl font-black flex items-center gap-2 justify-center md:justify-start">
-                  <Shield className="text-emerald-400" /> نظام النسخ الاحتياطي
+                <h3 className="text-xl font-black flex items-center gap-2 justify-center md:justify-start text-white">
+                  <Shield className="text-emerald-300" /> نظام النسخ الاحتياطي
                 </h3>
-                <p className="text-slate-400 text-xs font-bold">
+                <p className="text-emerald-100/80 text-xs font-bold">
                   حماية بياناتك هي أولويتنا. يتم تشفير كافة النسخ باستخدام AES-GCM (Web Crypto).
                 </p>
               </div>

@@ -1,6 +1,6 @@
 import { useState, Suspense, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, CheckCircle2, Search, SlidersHorizontal } from 'lucide-react';
+import { CheckCircle2, Search, SlidersHorizontal } from 'lucide-react';
 import { LoadingSkeleton } from '../components/shared/SettingsUI';
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from '../data/settingsSectionsMetadata';
 import { SettingsSectionItem } from '../types/settingsNavigation.types';
@@ -100,6 +100,7 @@ export default function SettingsModule({ onNavigate, initialTab }: SettingsModul
           isMobileDrillDown={mobileView === 'detail'}
           activeSectionTitle={activeSectionMeta.title}
           activeSectionDescription={activeSectionMeta.description}
+          activeSectionIcon={activeSectionMeta.icon}
         />
       </div>
 
@@ -109,17 +110,17 @@ export default function SettingsModule({ onNavigate, initialTab }: SettingsModul
             MOBILE VIEW (< lg breakpoint): 
             - Grouped vertical card navigation OR drilldown view into selected tab
            ======================================================================= */}
-        <div className="block lg:hidden w-full pb-6">
+        <div className="block lg:hidden w-full pb-28">
           {mobileView === 'list' ? (
             <div className="space-y-3.5">
               {/* Search feedback indicator on mobile */}
               {searchQuery && (
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 font-bold">
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200 font-bold">
                   <div className="flex items-center gap-2">
-                    <Search size={15} className="text-[#1E4D4D] dark:text-emerald-400" />
+                    <Search size={15} className="text-emerald-700 dark:text-emerald-400" />
                     <span>نتائج البحث عن: "{searchQuery}"</span>
                   </div>
-                  <span className="bg-[#1E4D4D]/10 text-[#1E4D4D] dark:text-emerald-300 px-2.5 py-0.5 rounded-full text-[11px] font-black">
+                  <span className="bg-emerald-200/60 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-black">
                     {filteredSections.length} نتيجة
                   </span>
                 </div>
@@ -160,51 +161,22 @@ export default function SettingsModule({ onNavigate, initialTab }: SettingsModul
           ) : (
             /* Mobile Drill-Down Section Content View */
             <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.15 }}
               className="space-y-3.5"
             >
-              {/* Return Bar & Drill-Down Breadcrumb */}
-              <div className="bg-white dark:bg-slate-850 border border-slate-200/90 dark:border-slate-700/80 rounded-2xl p-3 sm:p-3.5 flex items-center justify-between shadow-xs">
-                <button
-                  onClick={handleBackToCardList}
-                  className="flex items-center gap-2 text-xs font-bold text-[#1E4D4D] dark:text-emerald-400 hover:text-[#153737] transition-colors cursor-pointer min-h-[44px] px-2 rounded-lg"
-                  aria-label="العودة لقائمة أقسام الإعدادات"
-                >
-                  <ArrowRight size={17} />
-                  <span>العودة لكافة أقسام الإعدادات</span>
-                </button>
-
-                {(() => {
-                  const parentGroup = SETTINGS_GROUPS.find((g) => g.id === activeSectionMeta.groupId);
-                  return (
-                    parentGroup && (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${parentGroup.colorClass}`}>
+              {/* Group category breadcrumb indicator */}
+              {(() => {
+                const parentGroup = SETTINGS_GROUPS.find((g) => g.id === activeSectionMeta.groupId);
+                return (
+                  parentGroup && (
+                    <div className="flex items-center justify-between px-1">
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${parentGroup.colorClass}`}>
                         {parentGroup.title}
                       </span>
-                    )
-                  );
-                })()}
-              </div>
-
-              {/* Active Tab Header Card */}
-              {(() => {
-                const ActiveIcon = activeSectionMeta.icon;
-                return (
-                  <div className="bg-white dark:bg-slate-850 p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 shadow-xs flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#1E4D4D]/10 dark:bg-emerald-950/40 text-[#1E4D4D] dark:text-emerald-400 flex items-center justify-center shrink-0 border border-[#1E4D4D]/20">
-                      <ActiveIcon size={20} />
                     </div>
-                    <div className="min-w-0">
-                      <h2 className="text-sm font-bold text-slate-850 dark:text-slate-100 font-cairo leading-tight">
-                        {activeSectionMeta.title}
-                      </h2>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 font-cairo mt-0.5 line-clamp-1">
-                        {activeSectionMeta.description}
-                      </p>
-                    </div>
-                  </div>
+                  )
                 );
               })()}
 

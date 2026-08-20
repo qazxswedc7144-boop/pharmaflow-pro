@@ -4,7 +4,7 @@ import { Button, Modal } from '@/components/shared/SharedUI';
 import { ItemEntryModal } from '@features/sales/components/ItemEntryModal';
 import { 
   Search, Trash2, Plus, Camera, RotateCcw, CheckCircle2,
-  ShoppingBag, Package, Percent, Edit3, Clock,
+  ShoppingBag, Package, Percent, Clock,
   User, FileText, ArrowRight, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -18,6 +18,7 @@ import { InvoiceItemEditModal } from '@/components/shared/InvoiceItemEditModal';
 import { UnifiedModal } from '@/components/shared/UnifiedModal';
 import { SaveSuccessModal } from '@/components/shared/SaveSuccessModal';
 import { DraftRecoveryDialog } from '@/components/shared/DraftRecoveryDialog';
+import { SmartImportModal } from '../components/SmartImportModal';
 
 const formatDateDisplay = (dateStr: string) => {
   if (!dateStr) return '';
@@ -138,13 +139,17 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
     handlePost,
     safeNavigate,
     currency,
-    aiParsedData,
+    smartAnalysisResult,
+    importProgressStage,
+    importProgressPercent,
+    importProgressMessage,
+    applySmartImportData,
+    applyAndSaveSmartImport,
     isProcessingAI, setIsProcessingAI,
     hasUnsavedAI,
     showAIConfirmModal,
     setShowAIConfirmModal,
     handleAIImport,
-    applyAIParsedData,
     resetInvoiceState,
     suppliers,
     saveSuccessData,
@@ -300,7 +305,7 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
                 type="file" 
                 ref={fileInputRef} 
                 className="hidden" 
-                accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx"
+                accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx,.csv"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) handleAIImport(file);
@@ -637,101 +642,27 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
         </div>
       </div>
 
-      {/* AI CONFIRMATION MODAL */}
-      <Modal
+      {/* ENTERPRISE SMART PURCHASE IMPORT MODAL */}
+      <SmartImportModal
         isOpen={showAIConfirmModal}
-        onClose={() => setShowAIConfirmModal(false)}
-        title="المدير الذكي للمشتريات"
-      >
-        <div className="space-y-4 p-2 overflow-hidden flex flex-col max-h-[85vh]">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto text-emerald-600 mb-2">
-              <Sparkles size={32} />
-            </div>
-            <h3 className="text-[11px] font-black text-[#1E4D4D]">تم تحليل المستند بنجاح</h3>
-            <p className="text-[11px] font-bold text-slate-500 mb-4">
-              إليك مخلص البيانات المستخرجة:
-            </p>
-          </div>
-
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex-1 overflow-y-auto max-h-[360px]">
-             <div className="bg-emerald-50/80 border border-emerald-200/60 rounded-lg p-2.5 mb-3 flex items-start gap-2">
-               <Sparkles className="text-emerald-600 shrink-0 mt-0.5" size={16} />
-               <p className="text-[10px] font-bold text-emerald-800 leading-snug">
-                 تم تحليل الفاتورة واستخراج الأعمدة المطلوبة فقط (الاسم، الكمية، سعر الشراء، الصلاحية، الباركود، الخصم) والتخلص الذكي من بقية أعمدة المورد غير الضرورية.
-               </p>
-             </div>
-
-             <div className="grid grid-cols-2 gap-2 mb-3">
-               <div className="p-2 bg-white rounded-lg border border-slate-100 italic">
-                 <span className="block text-[10px] text-slate-400">المورد المكتشف</span>
-                 <span className="text-[11px] font-black text-[#1E4D4D]">{aiParsedData?.supplier || 'غير مكتشف'}</span>
-               </div>
-               <div className="p-2 bg-white rounded-lg border border-slate-100">
-                 <span className="block text-[10px] text-slate-400">رقم الفاتورة</span>
-                 <span className="text-[11px] font-black text-[#1E4D4D]">{aiParsedData?.invoice_number || '---'}</span>
-               </div>
-             </div>
-
-             <div className="space-y-1.5">
-               <div className="flex justify-between items-center text-[10px] font-black text-slate-500 border-b border-slate-200 pb-1">
-                 <span>الأصناف المفلترة والمستخرجة ({aiParsedData?.items?.length || 0}):</span>
-                 <span className="text-emerald-600 font-bold">جاهز للمراجعة</span>
-               </div>
-               {aiParsedData?.items?.map((item, i: number) => (
-                 <div key={i} className="bg-white p-2.5 rounded-lg border border-slate-100 text-[11px] space-y-1">
-                   <div className="flex justify-between items-center">
-                     <span className="font-black text-[#1E4D4D] truncate flex-1">{item.name}</span>
-                     <div className="flex items-center gap-1.5 shrink-0 pr-2">
-                       <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-black text-[10px]">
-                         x{item.quantity}{item.bonusQty ? ` (+${item.bonusQty} مجاني)` : ''}
-                       </span>
-                       <span className="font-bold text-slate-700">{item.price}</span>
-                     </div>
-                   </div>
-                   <div className="flex flex-wrap gap-2 text-[10px] text-slate-400 pt-0.5 border-t border-slate-50">
-                     {item.barcode && <span className="bg-slate-100 px-1 rounded text-slate-600">كود: {item.barcode}</span>}
-                     {item.expiryDate && <span className="bg-amber-50 text-amber-700 px-1 rounded">انتهاء: {item.expiryDate}</span>}
-                     {(item as any).discountPercent > 0 && <span className="bg-blue-50 text-blue-700 px-1 rounded">خصم: {item.discountPercent}%</span>}
-                     {item.batchNumber && <span className="bg-purple-50 text-purple-700 px-1 rounded">تشغيلة: {item.batchNumber}</span>}
-                   </div>
-                 </div>
-               ))}
-             </div>
-          </div>
-
-          <div className="flex flex-col gap-2 shrink-0 pt-2 border-t border-slate-100">
-            <button 
-              onClick={() => applyAIParsedData()}
-              className="w-full h-11 bg-[#1E4D4D] text-white rounded-xl font-black text-[11px] flex items-center justify-center gap-2"
-            >
-              <Edit3 size={18} />
-              نعم (تعديل ومراجعة)
-            </button>
-            <button 
-              onClick={() => {
-                applyAIParsedData();
-                setTimeout(() => handlePost(), 500);
-              }}
-              className="w-full h-11 bg-emerald-600 text-white rounded-xl font-black text-[11px] flex items-center justify-center gap-2"
-            >
-              <CheckCircle2 size={18} />
-              حفظ فوراً
-            </button>
-            <button 
-              onClick={() => {
-                setShowAIConfirmModal(false);
-                resetInvoiceState();
-                setIsProcessingAI(false);
-              }}
-              className="w-full h-10 bg-red-50 text-red-600 rounded-xl font-bold text-[11px] flex items-center justify-center gap-2 mt-1"
-            >
-              <Trash2 size={16} />
-              إلغاء الاستيراد
-            </button>
-          </div>
-        </div>
-      </Modal>
+        onClose={() => {
+          setShowAIConfirmModal(false);
+          resetInvoiceState();
+          setIsProcessingAI(false);
+        }}
+        analysisResult={smartAnalysisResult}
+        isLoading={isProcessingAI}
+        progressStage={importProgressStage}
+        progressPercent={importProgressPercent}
+        progressMessage={importProgressMessage}
+        onApply={(approvedRows, supplier, invNum, date) => {
+          applySmartImportData(approvedRows, supplier, invNum, date);
+        }}
+        onApplyAndSaveImmediately={(approvedRows, supplier, invNum, date) => {
+          applyAndSaveSmartImport(approvedRows, supplier, invNum, date);
+        }}
+        availableProducts={filteredProducts}
+      />
 
       {/* ADD ITEM POP-UP MODAL */}
       <ItemEntryModal 

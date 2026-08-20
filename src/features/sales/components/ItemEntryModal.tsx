@@ -4,6 +4,7 @@ import { db } from '@/core/db';
 import { Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStore } from '@/hooks/useAppStore';
+import { normalizeToISODate } from '@/utils/expiryUtils';
 
 interface ProductItem {
   id: string;
@@ -109,7 +110,7 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
         setManualItemName(initialData.name || '');
         setTempQty(initialData.qty || '');
         setTempPrice(initialData.price || '');
-        setTempExpiry(initialData.expiryDate || '');
+        setTempExpiry(normalizeToISODate(initialData.expiryDate));
         setTempNote(initialData.note || '');
         setCategoryName(initialData.category || '');
       } else {
@@ -141,7 +142,7 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
   const selectProduct = (p: ProductItem) => {
     setManualItemName(p.Name || ''); 
     setCategoryName(p.categoryName || p.category || ''); 
-    setTempExpiry(p.ExpiryDate || p.expiryDate || ''); 
+    setTempExpiry(normalizeToISODate(p.ExpiryDate || p.expiryDate || '')); 
     setShowSearchDropdown(false); 
     qtyInputRef.current?.focus();
   };
@@ -150,9 +151,10 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
     if (!manualItemName || !tempQty || !tempPrice) return;
     
     // محاولة جلب الصنف بطريقة غامضة وحالة عدم الحساسية للحالة (Case-insensitive)
-    let existing = await db.products.where('Name').equals(manualItemName).first();
+    let existing = await db.products.where('name').equals(manualItemName).first().catch(() => null) ||
+                   await db.products.where('Name').equals(manualItemName).first().catch(() => null);
     if (!existing) {
-      existing = await db.products.filter(p => (p.Name || '').toLowerCase() === manualItemName.toLowerCase()).first();
+      existing = await db.products.filter(p => ((p.Name || p.name || '')).toLowerCase() === manualItemName.toLowerCase()).first().catch(() => null);
     }
 
     let finalProductId = existing?.id || null;
@@ -189,7 +191,7 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
       name: manualItemName, 
       qty: parseFloat(tempQty as string), 
       price: parseFloat(tempPrice as string), 
-      expiryDate: tempExpiry, 
+      expiryDate: normalizeToISODate(tempExpiry), 
       note: tempNote, 
       category: categoryName || 'عام', 
       sum: parseFloat(tempQty as string) * parseFloat(tempPrice as string) 
@@ -224,7 +226,7 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
       name: manualItemName, 
       qty: parseFloat(tempQty as string), 
       price: parseFloat(tempPrice as string), 
-      expiryDate: tempExpiry, 
+      expiryDate: normalizeToISODate(tempExpiry), 
       note: tempNote, 
       category: categoryName || 'عام', 
       sum: parseFloat(tempQty as string) * parseFloat(tempPrice as string) 

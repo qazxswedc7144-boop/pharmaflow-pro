@@ -13,7 +13,7 @@ import { useAuthStore } from '@/store/authStore';
 import { db } from '@/core/db';
 import { BackupService } from '@/services/backupService';
 import { NotificationService } from '@/context/NotificationContext';
-import { BackButton } from '@/components/shared/BackButton';
+import { SettingsSectionHeader } from '../components/navigation/SettingsSectionHeader';
 
 // Real Firebase / Firestore Integrations
 import { 
@@ -518,25 +518,20 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
   return (
     <div className="p-2 sm:p-4 space-y-6 animate-in fade-in duration-500 font-sans text-right w-full" dir="rtl">
       
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-white p-5 sm:p-6 rounded-[24px] shadow-sm border border-slate-100 gap-4 w-full">
-        <div className="flex items-center gap-4">
-          {onNavigate && (
-            <BackButton onClick={() => onNavigate('dashboard')} />
-          )}
-          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-[#1E4D4D] text-white rounded-2xl flex items-center justify-center text-2xl shadow-lg shrink-0">
-            <ShieldCheck size={28} />
+      {/* UNIFIED SETTINGS SECTION HEADER */}
+      <SettingsSectionHeader
+        title="مركز صحة وفحص النظام المتقدم"
+        subtitle="تتبع الأداء والنزاهة، تسجيل الأجهزة، والحلول الاحتياطية السحابية الشاملة"
+        icon={ShieldCheck}
+        onBack={onNavigate ? () => onNavigate('settings') : undefined}
+        backTitle="العودة للإعدادات"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="neutral" onClick={runIntegritySweep} isLoading={isSweeping} icon={<RefreshCw size={14} />}>فحص النزاهة الشامل</Button>
+            <Button variant="neutral" onClick={runTests} isLoading={isRunning} icon="🧪">تشغيل وحدات الفحص</Button>
           </div>
-          <div>
-            <h2 className="text-xl sm:text-2xl font-black text-[#1E4D4D]">مركز صحة وفحص النظام المتقدم</h2>
-            <p className="text-slate-400 font-bold text-xs mt-1">تتبع الأداء والنزاهة، تسجيل الأجهزة، والحلول الاحتياطية السحابية الشاملة</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <Button variant="neutral" onClick={runIntegritySweep} isLoading={isSweeping} icon={<RefreshCw size={14} />}>فحص النزاهة الشامل</Button>
-          <Button variant="neutral" onClick={runTests} isLoading={isRunning} icon="🧪">تشغيل وحدات الفحص</Button>
-        </div>
-      </div>
+        }
+      />
 
       {isLicenseLocked && (
         <div className="bg-red-50 border border-red-200 text-red-900 p-4 rounded-xl flex items-center gap-3 animate-pulse">

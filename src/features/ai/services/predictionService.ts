@@ -50,7 +50,18 @@ class PredictionService {
     if (cached) return cached;
 
     const q = query.toLowerCase();
-    const allProducts = await db.db.products.where('Is_Active').equals(1).toArray();
+    let allProducts: Product[] = [];
+    try {
+      allProducts = await db.db.products.where('is_active').equals(1 as any).toArray().catch(() => []);
+      if (allProducts.length === 0) {
+        allProducts = await db.db.products.where('Is_Active').equals(1 as any).toArray().catch(() => []);
+      }
+      if (allProducts.length === 0) {
+        allProducts = await db.db.products.toArray().catch(() => []);
+      }
+    } catch {
+      allProducts = await db.db.products.toArray().catch(() => []);
+    }
     const { productCounts } = await this.getRecentUsageBoosts();
 
     const scored = allProducts.map(p => {

@@ -16,6 +16,8 @@ import { ErrorManager } from '@/core/errors';
 import { DraftService } from '@/services/system/DraftService';
 import { reportCache } from '@features/reports/services/reportCacheService';
 import { ReportEngine } from '@/services/reports/reportEngine';
+import { SmartImportOrchestrator } from '../services/smartImport/smartImportOrchestrator';
+import { ImportAnalysisResult, ExtractedImportRow } from '../services/smartImport/types';
 
 const DRAFT_KEY = 'pharmaflow_purchase_draft';
 
@@ -99,6 +101,10 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
   const [hasUnsavedAI, setHasUnsavedAI] = useState(false);
   const [showAIConfirmModal, setShowAIConfirmModal] = useState(false);
   const [aiParsedData, setAIParsedData] = useState<AIParsedInvoiceData | null>(null);
+  const [smartAnalysisResult, setSmartAnalysisResult] = useState<ImportAnalysisResult | null>(null);
+  const [importProgressStage, setImportProgressStage] = useState<string>('');
+  const [importProgressPercent, setImportProgressPercent] = useState<number>(0);
+  const [importProgressMessage, setImportProgressMessage] = useState<string>('');
   const [saveSuccessData, setSaveSuccessData] = useState<{
     invoiceNumber: string;
     totalAmount: number;
@@ -459,66 +465,104 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
   }, [onNavigate]);
 
   const handleAIImport = async (file: File | string) => {
-    console.log("IMPORT FLOW RUNNING");
-    console.log("STEP 1: FILE SELECTED");
     setIsProcessingAI(true);
-    let parsed: AIParsedInvoiceData | null = null;
-    let fallbackTriggered = false;
+    setImportProgressPercent(10);
+    setImportProgressStage('DETECTING_SOURCE');
+    setImportProgressMessage('جاري فحص مصدر وصيغة المستند...');
+    setShowAIConfirmModal(true);
 
     try {
-      console.log("STEP 2: AI START");
-      const { processInvoice } = await import('@features/ai/services/smartImportEngine');
-      parsed = await processInvoice(file);
-      console.log("STEP 3: AI DONE", parsed);
-    } catch (error: unknown) {
-      console.warn("[AI IMPORT] Main AI Engine failed. Engaging local backup OCR engine...", error);
-      fallbackTriggered = true;
-      try {
-        const { parseInvoiceLocally } = await import('@features/ai/services/localBackupOcrEngine');
-        parsed = await parseInvoiceLocally(file);
-        console.log("STEP 3 (FALLBACK): LOCAL OCR DONE", parsed);
-      } catch (fallbackError: unknown) {
-        console.error("Local Backup OCR Engine failed too:", fallbackError);
-        addToast("فشلت قراءة الفاتورة بكلا المحركين الذكي والمحلي 📴", "error");
-        setIsProcessingAI(false);
-        return;
-      }
-    }
-
-    if (!parsed || !parsed.items || parsed.items.length === 0) {
-      if (!fallbackTriggered) {
-        fallbackTriggered = true;
-        try {
-          const { parseInvoiceLocally } = await import('@features/ai/services/localBackupOcrEngine');
-          parsed = await parseInvoiceLocally(file);
-        } catch (e) {
-          addToast("لم يتم التعرف على بيانات الفاتورة بنجاح", "warning");
-          setIsProcessingAI(false);
-          return;
+      const user = authService.getCurrentUser();
+      const analysis = await SmartImportOrchestrator.analyzeInvoice(file, {
+        tenantId: (user as any)?.tenantId,
+        branchId: (user as any)?.branchId,
+        onProgress: (stage, percent, message) => {
+          setImportProgressStage(stage);
+          setImportProgressPercent(percent);
+          setImportProgressMessage(message);
         }
-      } else {
-        addToast("الفاتورة التي تم تحليلها لا تحتوي على أي أصناف مقروءة", "warning");
-        setIsProcessingAI(false);
-        return;
-      }
-    }
-
-    setAIParsedData(parsed);
-    console.log("STEP 4: MODAL OPENED");
-    setShowAIConfirmModal(true);
-    
-    // Handle attachment preview
-    if (typeof file === 'string') {
-      setHeader(prev => ({ ...prev, attachment: file }));
-    } else {
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file);
       });
-      setHeader(prev => ({ ...prev, attachment: base64 }));
+
+      setSmartAnalysisResult(analysis);
+      setAIParsedData({
+        invoice_number: analysis.summary.detectedInvoiceNumber,
+        supplier: analysis.summary.detectedSupplier,
+        notes: analysis.rawText,
+        items: analysis.rows.map(r => ({
+          name: r.productName,
+          quantity: r.quantity,
+          price: r.unitPrice,
+          discountPercent: r.discountPercent,
+          barcode: r.barcode,
+          bonusQty: r.bonusQty,
+          batchNumber: r.batchNumber,
+          notes: r.notes,
+          product_id: r.matchedProductId,
+          expiryDate: r.expiryDate
+        }))
+      });
+
+      // Handle attachment preview
+      if (typeof file === 'string') {
+        setHeader(prev => ({ ...prev, attachment: file }));
+      } else {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+        setHeader(prev => ({ ...prev, attachment: base64 }));
+      }
+
+      setIsProcessingAI(false);
+    } catch (error: any) {
+      console.error("[SMART IMPORT ERROR]:", error);
+      addToast(`❌ تعذر استيراد الفاتورة: ${error.message || 'خطأ غير متوقع'}`, "error");
+      setIsProcessingAI(false);
+      setShowAIConfirmModal(false);
     }
   };
+
+  const applySmartImportData = useCallback((
+    approvedRows: ExtractedImportRow[],
+    detectedSupplier?: string,
+    detectedInvoiceNumber?: string,
+    detectedDate?: string
+  ) => {
+    if (!approvedRows || approvedRows.length === 0) {
+      addToast("لا توجد أصناف معتمدة للتطبيق", "warning");
+      return;
+    }
+
+    const invNum = detectedInvoiceNumber || header.invoice_number || `INV-${Math.floor(Math.random() * 100000)}`;
+    const convertedItems = SmartImportOrchestrator.convertToInvoiceItems(approvedRows, invNum);
+
+    // Match supplier if found
+    let matchedSupplierId = header.supplier_id;
+    if (detectedSupplier) {
+      const match = suppliers?.find(s => 
+        s.Supplier_Name?.toLowerCase().includes(detectedSupplier.toLowerCase()) ||
+        detectedSupplier.toLowerCase().includes((s.Supplier_Name || '').toLowerCase())
+      );
+      if (match) {
+        matchedSupplierId = match.id || match.Supplier_ID || '';
+        setSupplierSearchTerm(match.Supplier_Name || '');
+      }
+    }
+
+    setItems(convertedItems);
+    setHeader(prev => ({
+      ...prev,
+      invoice_number: invNum,
+      supplier_id: matchedSupplierId || prev.supplier_id,
+      date: detectedDate || prev.date,
+      status: 'DRAFT'
+    }));
+
+    setHasUnsavedAI(true);
+    setShowAIConfirmModal(false);
+    addToast(`✅ تم استيراد ${convertedItems.length} صنف إلى الفاتورة بنجاح للمراجعة والحفظ`, "success");
+  }, [header.invoice_number, header.supplier_id, suppliers, addToast]);
 
   const applyAIParsedData = async () => {
     if (!aiParsedData) return;
@@ -906,6 +950,18 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
     // Implementation for export
   };
 
+  const applyAndSaveSmartImport = useCallback(async (
+    approvedRows: ExtractedImportRow[],
+    detectedSupplier?: string,
+    detectedInvoiceNumber?: string,
+    detectedDate?: string
+  ) => {
+    applySmartImportData(approvedRows, detectedSupplier, detectedInvoiceNumber, detectedDate);
+    setTimeout(() => {
+      handlePost();
+    }, 400);
+  }, [applySmartImportData, handlePost]);
+
   const printData = {
     invoiceId: header.invoice_number,
     title: header.isReturn ? "فاتورة مرتجع مشتريات" : "فاتورة مشتريات",
@@ -984,6 +1040,12 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
     printData,
     editingInvoiceId,
     aiParsedData,
+    smartAnalysisResult,
+    importProgressStage,
+    importProgressPercent,
+    importProgressMessage,
+    applySmartImportData,
+    applyAndSaveSmartImport,
     isProcessingAI, setIsProcessingAI,
     hasUnsavedAI,
     showAIConfirmModal,

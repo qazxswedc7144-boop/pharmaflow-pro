@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldCheck, ShieldAlert, Check, X, FileText, AlertTriangle, 
   Terminal, Lock, RefreshCw, Download, Database, Server, Play, Sparkles, 
-  ArrowRight, Layers
+  Layers
 } from 'lucide-react';
 import { useAuth } from '@features/auth/hooks/useAuth';
 import { EncryptedAuditExportModal } from '@/components/shared/EncryptedAuditExportModal';
+import { SettingsSectionHeader } from './navigation/SettingsSectionHeader';
 
 // Definition of Modules/Operations to audit
 const AUDIT_MODULES = [
@@ -437,65 +438,54 @@ export default function SecurityAuditDashboard({ onNavigate, initialTab }: Secur
   };
 
   return (
-    <div className="bg-white rounded-[24px] border border-gray-100 p-6 md:p-8 text-right shadow-sm max-w-full" dir="rtl">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-50 pb-6 mb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <span className="p-2.5 bg-emerald-50 rounded-xl text-emerald-600">
-              <ShieldCheck size={28} />
-            </span>
-            <h1 className="text-2xl font-black text-[#1E4D4D] tracking-tight">
-              مدقق ومصفوفة الأمان السيادي (Phase 5.2.7)
-            </h1>
-          </div>
-          <p className="text-slate-500 text-sm font-medium">
-            لوحة الأدلة للأمان والتدقيق الشامل في صلاحيات وقيود تطبيق PharmaFlow ERP.
-          </p>
-          <div className="flex items-center gap-2 mt-3">
+    <div className="space-y-6 text-right max-w-full" dir="rtl">
+      {/* Unified Settings Section Header */}
+      <SettingsSectionHeader
+        title="مدقق ومصفوفة الأمان السيادي"
+        subtitle="لوحة الأدلة للأمان والتدقيق الشامل في صلاحيات وقيود تطبيق PharmaFlow ERP"
+        icon={ShieldCheck}
+        onBack={onNavigate ? () => onNavigate('settings') : undefined}
+        backTitle="العودة للإعدادات"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
             <button 
               onClick={() => setShowEncryptedExportModal(true)}
-              className="flex items-center gap-2 text-xs text-white bg-[#1E4D4D] font-black rounded-xl px-4 py-2 hover:bg-[#163b3b] transition-all shadow-sm cursor-pointer"
+              className="flex items-center gap-2 text-xs text-slate-950 bg-emerald-400 hover:bg-emerald-300 font-black rounded-xl px-4 py-2.5 transition-all shadow-md cursor-pointer active:scale-95"
             >
-              <Lock size={14} className="text-emerald-400" />
+              <Lock size={14} className="text-slate-950" />
               <span>تصدير PDF مشفر</span>
             </button>
-            {onNavigate && (
-              <button 
-                onClick={() => onNavigate('settings')}
-                className="flex items-center gap-1.5 text-xs text-[#1E4D4D] font-black hover:underline cursor-pointer bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2"
-              >
-                <ArrowRight size={14} className="rotate-180" />
-                <span>العودة للإعدادات</span>
-              </button>
-            )}
           </div>
-        </div>
+        }
+      />
 
-        {/* Dynamic Assume Role Switcher */}
-        <div className="flex flex-col gap-1 bg-slate-50 p-3 rounded-2xl border border-slate-100 max-w-sm w-full md:w-auto">
-          <label className="text-[10px] text-slate-400 font-bold block mb-1">تجسيد هوية للمحاكاة (Assume Role Simulation):</label>
-          <div className="flex gap-2">
-            <select 
-              value={activeSimulationRole}
-              onChange={(e) => handleAssumeRole(e.target.value)}
-              className="bg-white border border-slate-200 text-slate-700 text-xs font-black rounded-lg px-3 py-2 outline-none focus:border-indigo-500 flex-1"
-            >
-              {AUDIT_ROLES.map(r => (
-                <option key={r.id} value={r.id}>{r.id}</option>
-              ))}
-            </select>
-            <div className="flex items-center justify-center bg-indigo-50 text-indigo-600 text-xs font-black px-2.5 py-1.5 rounded-lg border border-indigo-100">
-              نشط الآن
-            </div>
-          </div>
-          <div className="text-[10px] text-indigo-500 font-bold mt-1">
+      {/* Dynamic Assume Role Switcher Card */}
+      <div className="bg-white dark:bg-slate-850 p-4 sm:p-5 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <label className="text-xs text-slate-700 dark:text-slate-200 font-black block">تجسيد هوية للمحاكاة (Assume Role Simulation):</label>
+          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
             * تغيير الدور هنا يتفاعل معه التطبيق بالكامل ويتغير سلوك الواجهات فوراً!
+          </p>
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <select 
+            value={activeSimulationRole}
+            onChange={(e) => handleAssumeRole(e.target.value)}
+            className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-black rounded-xl px-3.5 py-2.5 outline-none focus:border-emerald-500 flex-1 sm:flex-none min-w-[200px]"
+          >
+            {AUDIT_ROLES.map(r => (
+              <option key={r.id} value={r.id}>{r.id}</option>
+            ))}
+          </select>
+          <div className="flex items-center justify-center bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-black px-3 py-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 shrink-0">
+            نشط الآن
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Main Card Wrapper for Tabs and Content */}
+      <div className="bg-white dark:bg-slate-850 rounded-[24px] border border-gray-100 dark:border-slate-800 p-4 sm:p-6 md:p-8 text-right shadow-sm">
+        {/* Tabs */}
       <div className="flex flex-wrap gap-2 mb-8 border-b border-gray-100 pb-4">
         {[
           { id: 'matrix', label: 'مصفوفة الصلاحيات الرئيسية', icon: Layers },
@@ -1173,6 +1163,7 @@ FINAL RBAC SOVEREIGN CONFORMANCE SUMMARY:
           </div>
         )}
       </AnimatePresence>
+      </div>
 
       <EncryptedAuditExportModal 
         isOpen={showEncryptedExportModal} 

@@ -15,20 +15,20 @@ export const InvoiceRepository = {
   },
 
   getSaleById: async (id: string): Promise<Sale | undefined> => {
-    return await db.sales.get(id);
+    return (await db.sales.get(id) || await db.invoices.get(id)) as unknown as Sale | undefined;
   },
 
   getPurchaseById: async (id: string): Promise<Purchase | undefined> => {
-    return await db.purchases.get(id);
+    return (await db.purchases.get(id) || await db.invoices.get(id)) as unknown as Purchase | undefined;
   },
 
-  saveSale: async (...args: unknown[]): Promise<unknown> => {
-    const sale = await db.processSale(args[0] as Parameters<typeof db.processSale>[0]);
+  saveSale: async (...args: any[]): Promise<unknown> => {
+    const sale = await (db.processSale as any)(...args);
     return sale;
   },
 
-  savePurchase: async (...args: unknown[]): Promise<unknown> => {
-    const purchase = await db.processPurchase(args[0] as Parameters<typeof db.processPurchase>[0]);
+  savePurchase: async (...args: any[]): Promise<unknown> => {
+    const purchase = await (db.processPurchase as any)(...args);
     return purchase;
   },
 

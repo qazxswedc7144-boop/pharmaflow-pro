@@ -359,16 +359,23 @@ export class PharmaFlowDB extends Dexie {
 
     // Version 27: Phase 8.1 - Offline Multi-Tenant Composite Key Architecture & Data Isolation
     this.version(27).stores({
-      products: '&id, name, barcode, sku, categoryId, supplierId, is_active, stock, updatedAt, tenantId, [tenantId+id], [tenantId+barcode], [tenantId+sku], [tenantId+categoryId]',
+      products: '&id, name, Name, barcode, sku, ProductID, categoryId, supplierId, is_active, Is_Active, stock, StockQuantity, updatedAt, tenantId, [tenantId+id], [tenantId+barcode], [tenantId+sku], [tenantId+categoryId]',
       invoices: '&id, invoice_number, invoiceNumber, date, Date, partner_id, partnerId, type, payment_status, financial_status, document_status, is_synced, createdAt, transactionUuid, tenantId, branchId, [tenantId+id], [tenantId+invoiceNumber], [tenantId+invoice_number], [tenantId+type], [tenantId+branchId], [tenantId+partnerId], [tenantId+partner_id], [type+partner_id], [type+partnerId], [type+invoice_number], [type+invoiceNumber]',
       sales: '&id, invoice_number, date, Date, InvoiceStatus, hash, SaleID, createdAt, transactionUuid, tenantId, branchId, [tenantId+id], [tenantId+invoice_number], [tenantId+branchId]',
       purchases: '&id, invoice_number, date, Date, invoiceStatus, hash, createdAt, transactionUuid, tenantId, branchId, [tenantId+id], [tenantId+invoice_number], [tenantId+branchId]',
-      customers: '&id, name, phone, email, tenantId, [tenantId+id], [tenantId+phone]',
-      suppliers: '&id, name, phone, email, tenantId, [tenantId+id], [tenantId+phone]',
+      customers: '&id, name, Name, phone, email, is_active, Is_Active, tenantId, [tenantId+id], [tenantId+phone]',
+      suppliers: '&id, name, Name, phone, email, is_active, Is_Active, tenantId, [tenantId+id], [tenantId+phone]',
       journalEntries: '&id, date, sourceId, sourceType, status, createdAt, tenantId, branchId, [tenantId+id], [tenantId+branchId], [tenantId+date]',
       accounts: '&id, code, name, type, parentId, tenantId, [tenantId+id], [tenantId+code]',
       syncQueue: '++id, &idempotencyKey, mutationId, syncStatus, tenantId, [tenantId+id], [tenantId+syncStatus], [syncStatus+createdAt], [entityType+createdAt]',
       outbox: '++id, &mutationId, &idempotencyKey, status, type, tenantId, createdAt, [tenantId+status], [status+createdAt]'
+    });
+
+    // Version 28: Defensive Product & Entity Schema Upgrade - Indexing Name, ProductID, Is_Active
+    this.version(28).stores({
+      products: '&id, name, Name, barcode, sku, ProductID, categoryId, supplierId, is_active, Is_Active, stock, StockQuantity, updatedAt, tenantId, [tenantId+id], [tenantId+barcode], [tenantId+sku], [tenantId+categoryId], [tenantId+name], [tenantId+Name]',
+      customers: '&id, name, Name, phone, email, is_active, Is_Active, tenantId, [tenantId+id], [tenantId+phone]',
+      suppliers: '&id, name, Name, phone, email, is_active, Is_Active, tenantId, [tenantId+id], [tenantId+phone]'
     });
 
     // Handle structural integrity and recovery
@@ -602,6 +609,7 @@ export class PharmaFlowDB extends Dexie {
       updatedAt: new Date().toISOString()
     };
     await this.invoices.put(sale);
+    try { await this.sales.put(sale as any); } catch {}
     return sale;
   }
 
@@ -634,6 +642,7 @@ export class PharmaFlowDB extends Dexie {
       updatedAt: new Date().toISOString()
     };
     await this.invoices.put(purchase);
+    try { await this.purchases.put(purchase as any); } catch {}
     return purchase;
   }
 

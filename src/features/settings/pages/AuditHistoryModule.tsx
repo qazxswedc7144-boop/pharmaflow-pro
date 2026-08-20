@@ -6,12 +6,12 @@ import { useUI } from '@/contexts/AppContext';
 import { Card } from '@/components/shared/SharedUI';
 import { 
   History, Search, 
-  Clock, Database, ChevronRight,
+  Clock, ChevronRight,
   ShieldCheck, FileText, Trash2, Plus,
   Lock
 } from 'lucide-react';
 import { EncryptedAuditExportModal } from '@/components/shared/EncryptedAuditExportModal';
-import { BackButton } from '@/components/shared/BackButton';
+import { SettingsSectionHeader } from '../components/navigation/SettingsSectionHeader';
 
 interface AuditHistoryModuleProps {
   onNavigate?: (view: any, params?: any) => void;
@@ -89,51 +89,29 @@ const AuditHistoryModule: React.FC<AuditHistoryModuleProps> = ({
 
   return (
     <div className="p-2 sm:p-4 space-y-4 sm:space-y-5 bg-[#F8FAFA] min-h-full pb-32 animate-in fade-in w-full" dir="rtl">
-      {/* Top Header Card */}
-      <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-200/80 shadow-sm transition-all w-full">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          
-          {/* Main Title & Group */}
-          <div className="flex items-center gap-3.5 sm:gap-4">
-            {onNavigate && (
-              <BackButton onClick={() => onNavigate('dashboard')} />
-            )}
-            <div className="w-12 h-12 sm:w-14 sm:h-14 bg-slate-900 text-white rounded-2xl flex items-center justify-center text-2xl shadow-md border-2 border-emerald-950 shrink-0">
-              <ShieldCheck className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-400" />
-            </div>
-            
-            <div className="space-y-1">
-              <div className="flex items-center flex-wrap gap-2">
-                <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-[#1E4D4D] tracking-tight">
-                  سجل الرقابة النهائية
-                </h2>
-                <div className="inline-flex items-center gap-1.5 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200 text-slate-700">
-                  <Lock size={11} className="text-slate-500" />
-                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-600">Immutable Logs</span>
-                </div>
-              </div>
-              <p className="text-slate-500 text-xs sm:text-sm font-bold flex items-center gap-1.5">
-                <Database size={13} className="text-slate-400 shrink-0" />
-                <span>
-                  {recordId ? `تاريخ تدقيق المستند: #${recordId}` : 'سجل تدقيق غير قابل للتلاعب'}
-                </span>
-              </p>
-            </div>
+      {/* Unified Settings Section Header */}
+      <SettingsSectionHeader
+        title="سجل الرقابة النهائية"
+        subtitle={recordId ? `تاريخ تدقيق المستند: #${recordId}` : 'سجل تدقيق غير قابل للتلاعب'}
+        icon={ShieldCheck}
+        onBack={onNavigate ? () => onNavigate('settings') : undefined}
+        backTitle="العودة للإعدادات"
+        badge={
+          <div className="inline-flex items-center gap-1.5 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-emerald-200">
+            <Lock size={11} className="text-emerald-400" />
+            <span className="text-[10px] font-black uppercase tracking-wider">Immutable Logs</span>
           </div>
-
-          {/* Actions Row */}
-          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 self-stretch sm:self-auto w-full lg:w-auto">
-            <button 
-              onClick={() => setShowExportModal(true)} 
-              className="flex-1 lg:flex-none bg-[#1E4D4D] hover:bg-[#163b3b] text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 cursor-pointer"
-            >
-              <Lock size={15} className="text-emerald-400" />
-              <span>تصدير PDF مشفر</span>
-            </button>
-          </div>
-
-        </div>
-      </div>
+        }
+        actions={
+          <button 
+            onClick={() => setShowExportModal(true)} 
+            className="flex-1 sm:flex-none bg-emerald-400 hover:bg-emerald-300 text-slate-950 px-4 sm:px-5 py-2.5 rounded-xl sm:rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer"
+          >
+            <Lock size={15} className="text-slate-950" />
+            <span>تصدير PDF مشفر</span>
+          </button>
+        }
+      />
 
       {/* Filters Section - Unified Filter Card */}
       <div className="bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center">

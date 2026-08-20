@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { normalizeToISODate } from '@/utils/expiryUtils';
 
 export interface InvoiceItem {
   id: string;
@@ -32,7 +33,11 @@ export const InvoiceItemEditModal: React.FC<InvoiceItemEditModalProps> = ({
 
   useEffect(() => {
     if (item) {
-      setLocalItem({ ...item, notes: item.notes || "" });
+      setLocalItem({ 
+        ...item, 
+        expiryDate: normalizeToISODate(item.expiryDate),
+        notes: item.notes || "" 
+      });
     }
   }, [item]);
 
