@@ -19,6 +19,7 @@ import { UnifiedModal } from '@/components/shared/UnifiedModal';
 import { SaveSuccessModal } from '@/components/shared/SaveSuccessModal';
 import { DraftRecoveryDialog } from '@/components/shared/DraftRecoveryDialog';
 import { SmartImportModal } from '../components/SmartImportModal';
+import { normalizeToISODate, formatExpiryDateDisplay, getExpiryStatus } from '@/utils/expiryUtils';
 
 const formatDateDisplay = (dateStr: string) => {
   if (!dateStr) return '';
@@ -39,7 +40,7 @@ const InvoiceItemRow = React.memo(({
   item, 
   onDelete, 
   onClick,
-  isExpirySoon, 
+  isExpirySoon: _isExpirySoon, 
   isPriceHigher,
   idx
 }: { 
@@ -49,50 +50,83 @@ const InvoiceItemRow = React.memo(({
   isExpirySoon: (date: string) => boolean;
   isPriceHigher: (item: InvoiceItem) => boolean;
   idx: number;
-}) => (
-  <motion.div 
-    initial={{ opacity: 0, x: 20 }}
-    animate={{ opacity: 1, x: 0 }}
-    exit={{ opacity: 0, x: -20 }}
-    className="flex items-center px-4 py-3 hover:bg-slate-50/50 transition-colors cursor-pointer w-full group relative"
-    onClick={() => {
-      onClick?.();
-    }}
-  >
-    <div className="flex-[2] flex flex-col pr-1">
-      <span className="text-[9px] font-black text-[#1E4D4D] truncate w-full">{item.name}</span>
-      {item.expiryDate && (
-        <span className={`text-[9px] font-black flex items-center gap-1 mt-0.5 ${isExpirySoon(item.expiryDate) ? 'text-red-500' : 'text-slate-400'}`}>
-          <Clock size={10}/> {item.expiryDate}
+}) => {
+  const rawExpiry = item.expiryDate || (item as any).ExpiryDate || (item as any).expiry_date || (item as any).expirationDate || '';
+  const expiryDate = normalizeToISODate(rawExpiry);
+  const formattedExpiry = formatExpiryDateDisplay(expiryDate);
+  const expiryStatus = getExpiryStatus(expiryDate);
+  const isExp = expiryStatus.isExpired;
+  const isSoon = expiryStatus.isNearExpiry;
+
+  const displayName = item.name || item.productName || (item as any).Name || '---';
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      className="flex items-center px-4 py-2.5 hover:bg-slate-50/50 transition-colors cursor-pointer w-full group relative min-h-[52px]"
+      onClick={() => {
+        onClick?.();
+      }}
+    >
+      {/* Logical Column 1: Product Name + Integrated Expiry Date (Vertical Adaptive Expansion) */}
+      <div className="flex-[2] flex flex-col min-w-0 pr-1 text-right justify-center">
+        <span className="text-[10px] sm:text-[11px] font-black text-[#1E4D4D] leading-snug break-words whitespace-normal select-text">
+          {displayName}
         </span>
-      )}
-    </div>
-    <div className="flex-1 text-center font-black">
-      <span className={`text-[9px] rounded-md px-1 sm:px-2 py-0.5 ${
-        item.qty < 5 ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-[#1E4D4D]'
-      }`}>
-        {item.qty}
-      </span>
-    </div>
-    <div className={`flex-1 text-center text-[9px] font-black ${isPriceHigher(item) ? 'text-red-500 font-black' : 'text-slate-600'}`}>
-      {item.price.toLocaleString()}
-    </div>
-    <div className="flex-1 text-center text-[9px] font-black text-[#1E4D4D]">{(item.sum ?? 0).toLocaleString()}</div>
-    
-    <div className="w-10 flex items-center justify-center shrink-0">
-      <button 
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(idx);
-        }}
-        className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-        title="حذف الصنف"
-      >
-        <Trash2 size={15} />
-      </button>
-    </div>
-  </motion.div>
-));
+        {expiryDate && (
+          <div 
+            className={`text-[9px] font-bold flex items-center gap-1 mt-1 leading-none ${
+              isExp 
+                ? 'text-red-600 font-black' 
+                : isSoon 
+                  ? 'text-amber-600 font-black' 
+                  : 'text-slate-400 font-medium'
+            }`}
+            title={expiryStatus.label || `انتهاء الصلاحية: ${formattedExpiry}`}
+          >
+            <Clock size={10} className="shrink-0" />
+            <span className="truncate">انتهاء: {formattedExpiry}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Logical Column 2: Quantity */}
+      <div className="flex-1 text-center font-black">
+        <span className={`text-[9px] sm:text-[10px] font-black rounded-md px-1 sm:px-2 py-0.5 inline-block ${
+          item.qty < 5 ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-[#1E4D4D]'
+        }`}>
+          {item.qty}
+        </span>
+      </div>
+
+      {/* Logical Column 3: Price */}
+      <div className={`flex-1 text-center text-[9px] sm:text-[10px] font-black ${isPriceHigher(item) ? 'text-red-500 font-black' : 'text-slate-600'}`}>
+        {item.price.toLocaleString()}
+      </div>
+
+      {/* Logical Column 4: Total */}
+      <div className="flex-1 text-center text-[9px] sm:text-[10px] font-black text-[#1E4D4D]">
+        {(item.sum ?? (item.qty * item.price) ?? 0).toLocaleString()}
+      </div>
+      
+      {/* Row Action: Delete Button */}
+      <div className="w-10 flex items-center justify-center shrink-0">
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(idx);
+          }}
+          className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+          title="حذف الصنف"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </motion.div>
+  );
+});
 
 const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<string, unknown>) => void }> = ({ onNavigate }) => {
   const { addToast, refreshGlobal } = useUI();
@@ -183,12 +217,27 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
     setIsAddItemModalOpen(true);
   };
 
-  const handleAddItem = (item: InvoiceItem & { productId?: string }) => {
+  const handleAddItem = (item: any) => {
+    const rawExp = item.expiryDate || item.ExpiryDate || item.expiry_date || item.expirationDate || '';
+    const normExp = normalizeToISODate(rawExp);
+
     const newItem: InvoiceItem = {
       ...item,
-      product_id: item.productId || item.product_id,
+      id: item.id || `PUR-DET-${Date.now()}`,
+      product_id: item.productId || item.product_id || `manual-${Date.now()}`,
+      productId: item.productId || item.product_id || `manual-${Date.now()}`,
+      name: item.name || item.productName || item.Name || '',
+      productName: item.productName || item.name || item.Name || '',
+      qty: Number(item.qty ?? item.quantity ?? 1),
+      quantity: Number(item.quantity ?? item.qty ?? 1),
+      price: Number(item.price ?? item.unitPrice ?? 0),
+      unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+      sum: Number(item.sum ?? ((item.qty ?? item.quantity ?? 1) * (item.price ?? item.unitPrice ?? 0))),
+      subtotal: Number(item.subtotal ?? item.sum ?? ((item.qty ?? item.quantity ?? 1) * (item.price ?? item.unitPrice ?? 0))),
       parent_id: header.invoice_number,
-      row_order: items.length + 1
+      row_order: items.length + 1,
+      expiryDate: normExp,
+      category: item.category || item.categoryName || ''
     };
 
     // Check if updating an existing row in the table
@@ -200,6 +249,7 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
         updated[existingRowIdx] = {
           ...existing,
           ...newItem,
+          expiryDate: normExp || existing.expiryDate,
           row_order: existing.row_order
         };
       }
@@ -217,10 +267,14 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
       const updatedItems = [...items];
       const existingItem = updatedItems[existingItemIndex];
       if (existingItem) {
+        const totalQty = existingItem.qty + newItem.qty;
         updatedItems[existingItemIndex] = {
           ...existingItem,
-          qty: existingItem.qty + newItem.qty,
-          sum: (existingItem.qty + newItem.qty) * existingItem.price
+          qty: totalQty,
+          quantity: totalQty,
+          sum: totalQty * existingItem.price,
+          subtotal: totalQty * existingItem.price,
+          expiryDate: normExp || existingItem.expiryDate
         };
       }
       setItems(updatedItems);
@@ -233,13 +287,16 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
   const handleRowClick = React.useCallback((item: InvoiceItem) => {
     if (isLocked) return;
 
+    const rawExp = item.expiryDate || (item as any).ExpiryDate || (item as any).expiry_date || '';
     setEditingItem({
       id: item.id,
-      name: item.name,
+      product_id: item.product_id || (item as any).productId,
+      name: item.name || item.productName || '',
       qty: item.qty,
       price: item.price,
-      expiryDate: item.expiryDate || '',
-      notes: item.notes || ''
+      expiryDate: normalizeToISODate(rawExp),
+      notes: item.notes || (item as any).note || '',
+      category: (item as any).category
     });
     setIsEditModalOpen(true);
   }, [isLocked]);
@@ -247,14 +304,23 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
   const handleSaveModalData = React.useCallback((updatedItem: Partial<InvoiceItem>) => {
     setItems(prev => prev.map(i => {
       if (i.id === updatedItem.id) {
+        const newQty = updatedItem.qty !== undefined ? Number(updatedItem.qty) : i.qty;
+        const newPrice = updatedItem.price !== undefined ? Number(updatedItem.price) : i.price;
+        const rawExp = updatedItem.expiryDate !== undefined ? updatedItem.expiryDate : i.expiryDate;
+        const newExp = normalizeToISODate(rawExp);
+
         return {
           ...i,
           name: updatedItem.name || i.name,
-          qty: updatedItem.qty !== undefined ? updatedItem.qty : i.qty,
-          price: updatedItem.price !== undefined ? updatedItem.price : i.price,
-          expiryDate: updatedItem.expiryDate !== undefined ? updatedItem.expiryDate : i.expiryDate,
+          productName: updatedItem.name || i.name || i.productName,
+          qty: newQty,
+          quantity: newQty,
+          price: newPrice,
+          unitPrice: newPrice,
+          expiryDate: newExp,
           notes: updatedItem.notes !== undefined ? updatedItem.notes : i.notes,
-          sum: (updatedItem.qty !== undefined ? updatedItem.qty : i.qty) * (updatedItem.price !== undefined ? updatedItem.price : i.price)
+          sum: newQty * newPrice,
+          subtotal: newQty * newPrice
         };
       }
       return i;
@@ -688,6 +754,7 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
           name: selectedProduct.Name || selectedProduct.name,
           price: selectedProduct.CostPrice || selectedProduct.UnitPrice,
           category: selectedProduct.categoryName,
+          expiryDate: (selectedProduct as any).ExpiryDate || (selectedProduct as any).expiryDate || (selectedProduct as any).Expiry_Date || '',
           product: { ...selectedProduct, Name: selectedProduct.Name || selectedProduct.name }
         } : null)}
       />

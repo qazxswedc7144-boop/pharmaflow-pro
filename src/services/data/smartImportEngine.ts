@@ -314,7 +314,23 @@ export async function processInvoice(file: File | string): Promise<ParsedInvoice
   if (!text) {
     if (file instanceof File) {
       const fileName = file.name.toLowerCase();
-      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv') || file.type.includes('excel') || file.type.includes('csv') || file.type.includes('spreadsheet')) {
+      if (fileName.endsWith('.docx') || fileName.endsWith('.doc') || file.type.includes('wordprocessingml')) {
+        const { DocxParserAdapter } = await import('@features/purchases/services/smartImport/parsers/DocxParserAdapter');
+        const docxParser = new DocxParserAdapter();
+        const doc = await docxParser.parse(file, { tenantId: 'DEFAULT_TENANT', branchId: 'WH-MAIN' });
+        const primary = doc.tables.find(t => t.isPrimaryInvoiceTable) || doc.tables[0];
+        if (primary && primary.rows.length > 0) {
+          excelItems = primary.rows.map(r => ({
+            name: String(r.cells.productName || r.rawCells?.[0] || ''),
+            quantity: Number(r.cells.quantity || r.rawCells?.[1]) || 1,
+            price: Number(r.cells.unitPrice || r.rawCells?.[2]) || 0,
+            expiryDate: String(r.cells.expiryDate || ''),
+            batchNumber: String(r.cells.batchNumber || ''),
+            barcode: String(r.cells.barcode || '')
+          }));
+          text = `[مستند Word - استخراج جداول الأصناف]\n` + excelItems.map(i => `- ${i.name} x${i.quantity} @${i.price}`).join('\n');
+        }
+      } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv') || file.type.includes('excel') || file.type.includes('csv') || file.type.includes('spreadsheet')) {
         const excelRes = await extractDataFromExcelOrCSV(file);
         text = excelRes.text;
         excelItems = excelRes.structuredItems;

@@ -3,7 +3,119 @@
  * Types & Data Contracts for PharmaFlow Enterprise Smart Purchase Import Engine
  */
 
-export type ImportSourceType = 'EXCEL' | 'CSV' | 'IMAGE' | 'PDF' | 'CAMERA' | 'UNKNOWN';
+export type ImportSourceType = 
+  | 'EXCEL' 
+  | 'CSV' 
+  | 'TSV'
+  | 'TXT'
+  | 'DOCX'
+  | 'PDF'
+  | 'PDF_TEXT' 
+  | 'PDF_SCANNED' 
+  | 'IMAGE' 
+  | 'CAMERA' 
+  | 'UNKNOWN';
+
+export type ExtractionMethod = 
+  | 'SPREADSHEET' 
+  | 'DOCX_TABLE' 
+  | 'PDF_TEXT' 
+  | 'OCR' 
+  | 'AI_DOCUMENT';
+
+export interface CanonicalImportRawRow {
+  sourceRowIndex: number;
+  cells: Record<string, unknown>;
+  rawCells?: unknown[];
+  sourceReference?: {
+    page?: number;
+    sheet?: string;
+    table?: number;
+    row?: number;
+  };
+}
+
+export interface CanonicalImportTable {
+  id: string;
+  sourceIndex: number;
+  name?: string;
+  headers: string[];
+  rows: CanonicalImportRawRow[];
+  confidence?: number;
+  isPrimaryInvoiceTable: boolean;
+}
+
+export interface ImportWarning {
+  code: string;
+  message: string;
+  severity: 'INFO' | 'WARNING' | 'ERROR';
+  rowIndex?: number;
+  columnName?: string;
+}
+
+export interface ImportDiagnostic {
+  code: string;
+  severity: 'INFO' | 'WARNING' | 'ERROR';
+  message: string;
+  sourceReference?: {
+    page?: number;
+    sheet?: string;
+    table?: number;
+    row?: number;
+  };
+  metadata?: Record<string, unknown>;
+}
+
+export interface CanonicalImportDocument {
+  id: string;
+  source: {
+    type: ImportSourceType;
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
+    hash?: string;
+    pageCount?: number;
+    sheetCount?: number;
+    tableCount?: number;
+  };
+  metadata: {
+    detectedLanguage?: string;
+    extractionMethod: ExtractionMethod;
+    extractedAt: string;
+    parserVersion: string;
+    confidence?: number;
+  };
+  documentFields: {
+    supplierName?: string;
+    supplierCode?: string;
+    supplierPhone?: string;
+    supplierTaxNumber?: string;
+    invoiceNumber?: string;
+    invoiceDate?: string;
+    currency?: string;
+    subtotal?: number;
+    discount?: number;
+    tax?: number;
+    total?: number;
+    notes?: string;
+  };
+  tables: CanonicalImportTable[];
+  warnings: ImportWarning[];
+  diagnostics: ImportDiagnostic[];
+}
+
+export interface ImportParseContext {
+  tenantId: string;
+  branchId: string;
+  userId?: string;
+  onProgress?: (percent: number, message: string) => void;
+  signal?: AbortSignal;
+}
+
+export interface ImportSourceParser {
+  canParse(file: File | string, type: ImportSourceType): boolean;
+  parse(file: File | string, context: ImportParseContext): Promise<CanonicalImportDocument>;
+}
 
 export type TargetField = 
   | 'productName' 

@@ -5,20 +5,23 @@ import { ColumnIntelligence } from './columnIntelligence';
 import { DataValidator } from './dataValidator';
 import { ProductMatchingEngine } from './productMatchingEngine';
 import { OCRDocumentParser } from './ocrDocumentParser';
+import { ParserRegistry, DocxParserAdapter } from './parsers';
 import { 
   ImportAnalysisResult, 
   ExtractedImportRow, 
   ColumnDefinition, 
-  TargetField,
-  SmartImportProgressCallback
+  TargetField, 
+  SmartImportProgressCallback,
+  CanonicalImportDocument
 } from './types';
 import { authService } from '@features/auth/services/authService';
 import { auditLogService } from '@/services/audit/auditLog';
 import { Product, InvoiceItem } from '@/types';
+import { normalizeToISODate } from '@/utils/expiryUtils';
 
 export class SmartImportOrchestrator {
   /**
-   * Main pipeline entry point: analyzes uploaded invoice file or camera capture
+   * Main pipeline entry point: analyzes uploaded invoice file, DOCX, spreadsheet, PDF, or camera capture
    */
   static async analyzeInvoice(
     file: File | string,
@@ -59,8 +62,38 @@ export class SmartImportOrchestrator {
     let detectedDate: string | undefined = undefined;
     let rawText: string | undefined = undefined;
 
-    // 2. Routing to appropriate parser
-    if (validation.sourceType === 'EXCEL' || validation.sourceType === 'CSV') {
+    // 2. Routing to appropriate parser adapter
+    if (validation.sourceType === 'DOCX') {
+      onProgress?.('PARSING_DOCUMENT', 30, 'جاري قراءة وتحليل جداول ملف Word (.docx)...');
+      const docxParser = new DocxParserAdapter();
+      const canonicalDoc = await docxParser.parse(file, {
+        tenantId,
+        branchId,
+        userId,
+        onProgress: (pct, msg) => onProgress?.('PARSING_DOCUMENT', pct, msg)
+      });
+
+      const primaryTable = canonicalDoc.tables.find(t => t.isPrimaryInvoiceTable) || canonicalDoc.tables[0];
+      if (!primaryTable || primaryTable.rows.length === 0) {
+        throw new Error('لم يتم العثور على أي جداول بيانات صالحة داخل ملف Word.');
+      }
+
+      // Synthesize column definitions from headers
+      const sampleValues = primaryTable.rows.slice(0, 5).map(r => r.rawCells?.map(c => String(c || '')) || []);
+      const samplesByCol: string[][] = primaryTable.headers.map((_, colIdx) => 
+        sampleValues.map(row => row[colIdx] || '').filter(Boolean)
+      );
+
+      detectedColumns = ColumnIntelligence.analyzeHeaders(primaryTable.headers, samplesByCol);
+
+      // Extract rows from primary table
+      const grid = [
+        primaryTable.headers,
+        ...primaryTable.rows.map(r => (r.rawCells ? r.rawCells.map(c => String(c ?? '')) : Object.values(r.cells).map(c => String(c ?? ''))))
+      ];
+      headerRowIndex = 0;
+      rawExtractedRows = this.extractRowsFromGrid(grid, 0, detectedColumns);
+    } else if (validation.sourceType === 'EXCEL' || validation.sourceType === 'CSV') {
       onProgress?.('PARSING_DOCUMENT', 30, 'جاري قراءة وتحليل بيانات الجدول وجداول المورد...');
       const grid = await SpreadsheetParser.parseFileToGrid(file as File);
       
@@ -157,6 +190,36 @@ export class SmartImportOrchestrator {
         processingTimeMs
       }
     };
+  }
+
+  /**
+   * Universal method to analyze and parse a file into CanonicalImportDocument
+   */
+  static async parseToCanonicalDocument(
+    file: File | string,
+    options: {
+      tenantId?: string;
+      branchId?: string;
+      onProgress?: (percent: number, message: string) => void;
+    } = {}
+  ): Promise<CanonicalImportDocument> {
+    const user = authService.getCurrentUser();
+    const tenantId = options.tenantId || (user as any)?.tenantId || 'DEFAULT_TENANT';
+    const branchId = options.branchId || (user as any)?.branchId || 'WH-MAIN';
+    const userId = user?.User_Email || user?.id || 'SYSTEM_USER';
+
+    const validation = SourceDetector.validateFile(file);
+    if (!validation.isValid) {
+      throw new Error(validation.errorMessage || 'ملف غير مدعوم');
+    }
+
+    const parser = ParserRegistry.getParser(file, validation.sourceType);
+    return await parser.parse(file, {
+      tenantId,
+      branchId,
+      userId,
+      onProgress: options.onProgress
+    });
   }
 
   /**
@@ -311,7 +374,7 @@ export class SmartImportOrchestrator {
           sum: finalSum,
           discount_val: disc,
           row_order: idx + 1,
-          expiryDate: row.expiryDate || '',
+          expiryDate: normalizeToISODate(row.expiryDate),
           notes: notesParts.join(' | ')
         };
       });

@@ -18,6 +18,7 @@ import { reportCache } from '@features/reports/services/reportCacheService';
 import { ReportEngine } from '@/services/reports/reportEngine';
 import { SmartImportOrchestrator } from '../services/smartImport/smartImportOrchestrator';
 import { ImportAnalysisResult, ExtractedImportRow } from '../services/smartImport/types';
+import { normalizeToISODate } from '@/utils/expiryUtils';
 
 const DRAFT_KEY = 'pharmaflow_purchase_draft';
 
@@ -234,7 +235,19 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
               attachment: inv.attachment || '',
               isReturn: inv.invoiceType === 'مرتجع'
             });
-            setItems(inv.items || []);
+            const normalizedItems = (inv.items || []).map((i: any, idx: number) => ({
+              ...i,
+              name: i.name || i.productName || i.Name || '',
+              productName: i.productName || i.name || i.Name || '',
+              qty: Number(i.qty ?? i.quantity ?? 0),
+              quantity: Number(i.quantity ?? i.qty ?? 0),
+              price: Number(i.price ?? i.unitPrice ?? 0),
+              unitPrice: Number(i.unitPrice ?? i.price ?? 0),
+              sum: Number(i.sum ?? ((i.qty ?? i.quantity ?? 0) * (i.price ?? i.unitPrice ?? 0))),
+              row_order: i.row_order || idx + 1,
+              expiryDate: normalizeToISODate(i.expiryDate || i.ExpiryDate || i.expiry_date || i.expirationDate || '')
+            }));
+            setItems(normalizedItems);
             setAdjData({
               discountPercent: inv.discountPercent || 0,
               otherFees: inv.otherFees || 0,
@@ -311,10 +324,21 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
         if (data.header) {
           setHeader(data.header);
         }
-        if (draftObj.items) {
-          setItems(draftObj.items);
-        } else if (data.items) {
-          setItems(data.items);
+        const rawItems = draftObj.items || data.items || [];
+        if (rawItems && rawItems.length > 0) {
+          const normalizedItems = rawItems.map((i: any, idx: number) => ({
+            ...i,
+            name: i.name || i.productName || i.Name || '',
+            productName: i.productName || i.name || i.Name || '',
+            qty: Number(i.qty ?? i.quantity ?? 0),
+            quantity: Number(i.quantity ?? i.qty ?? 0),
+            price: Number(i.price ?? i.unitPrice ?? 0),
+            unitPrice: Number(i.unitPrice ?? i.price ?? 0),
+            sum: Number(i.sum ?? ((i.qty ?? i.quantity ?? 0) * (i.price ?? i.unitPrice ?? 0))),
+            row_order: i.row_order || idx + 1,
+            expiryDate: normalizeToISODate(i.expiryDate || i.ExpiryDate || i.expiry_date || i.expirationDate || '')
+          }));
+          setItems(normalizedItems);
         }
         if (data.adjData) {
           setAdjData(data.adjData);
@@ -622,7 +646,7 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
         sum: finalSum,
         discount_val: disc,
         row_order: idx + 1,
-        expiryDate: item.expiryDate || '',
+        expiryDate: normalizeToISODate(item.expiryDate || (item as any).ExpiryDate || (item as any).expiry_date || ''),
         notes: notesParts.join(' | '),
         category: item.categoryId || ''
       };
@@ -782,7 +806,7 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
       subtotal: Number(tempQty) * Number(tempPrice),
       sum: Number(tempQty) * Number(tempPrice),
       row_order: items.length + 1,
-      expiryDate: tempExpiry,
+      expiryDate: normalizeToISODate(tempExpiry),
       notes: tempNote,
       category: selectedCategoryId || selectedProduct?.categoryId
     };
@@ -843,7 +867,10 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
             type: 'PURCHASE',
             payload: {
               supplierId: header.supplier_id,
-              items,
+              items: items.map(item => ({
+                ...item,
+                expiryDate: normalizeToISODate(item.expiryDate || (item as any).ExpiryDate || (item as any).expiry_date || (item as any).expirationDate || '')
+              })),
               total: vTotalSum,
               invoiceId: header.invoice_number,
               id: editingInvoiceId || undefined,

@@ -82,9 +82,9 @@ export const getExpiryStatus = (expiryDate?: string | null): ExpiryStatus => {
   const parts = iso.split('-');
   if (parts.length !== 3) return { isExpired: false, isNearExpiry: false };
 
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10);
-  const day = parseInt(parts[2], 10);
+  const year = parseInt(parts[0] || '0', 10);
+  const month = parseInt(parts[1] || '0', 10);
+  const day = parseInt(parts[2] || '0', 10);
 
   const expiry = new Date(year, month - 1, day, 23, 59, 59, 999);
   if (isNaN(expiry.getTime())) {
@@ -115,9 +115,9 @@ export const isValidExpiryDate = (dateStr?: string | null): boolean => {
   if (!iso) return false;
   const parts = iso.split('-');
   if (parts.length !== 3) return false;
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10);
-  const day = parseInt(parts[2], 10);
+  const year = parseInt(parts[0] || '0', 10);
+  const month = parseInt(parts[1] || '0', 10);
+  const day = parseInt(parts[2] || '0', 10);
   if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
     return false;
   }

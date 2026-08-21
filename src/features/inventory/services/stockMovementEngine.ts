@@ -3,6 +3,7 @@ import { db } from '@/core/db';
 import { StockMovement, Sale, Purchase, UnifiedInvoice } from '@/types';
 import { PeriodLockEngine } from '@/services/transactions/PeriodLockEngine';
 import { InventoryEngine } from './inventoryEngine';
+import { normalizeToISODate } from '@/utils/expiryUtils';
 
 export class StockMovementEngine {
 
@@ -224,9 +225,10 @@ export class StockMovementEngine {
           await this.recordPurchaseMovement(itemId, qty, price, invoiceId);
 
           // Record pharmaceutical inventory batch
-          if (item.expiryDate || item.batchNumber || item.batchId) {
+          const rawExp = item.expiryDate || item.ExpiryDate || item.expiry_date || item.expirationDate;
+          const expDate = normalizeToISODate(String(rawExp || ''));
+          if (expDate || item.batchNumber || item.batchId) {
             try {
-              const expDate = String(item.expiryDate || '');
               const batchNum = String(item.batchNumber || item.batchId || (expDate ? `B-${expDate.replace(/[^0-9]/g, '')}` : `BATCH-${invoiceId.slice(-4)}`));
               const batchId = item.batchId || `BATCH_${invoiceId}_${itemId}_${batchNum}`;
               const existingBatch = await db.medicineBatches.get(batchId).catch(() => null);

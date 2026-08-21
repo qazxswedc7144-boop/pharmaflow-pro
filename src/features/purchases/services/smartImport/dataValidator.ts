@@ -1,5 +1,6 @@
 // src/features/purchases/services/smartImport/dataValidator.ts
 import { ExtractedImportRow, RowValidationStatus, ImportSummary } from './types';
+import { normalizeToISODate, isValidExpiryDate } from '@/utils/expiryUtils';
 
 export class DataValidator {
   /**
@@ -11,61 +12,28 @@ export class DataValidator {
     }
 
     const clean = rawDate.trim().replace(/\s+/g, '');
-    let year: number = 0;
-    let month: number = 0;
-    let day: number = 1;
+    const iso = normalizeToISODate(clean);
 
-    // Pattern 1: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
-    let match = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-    if (match && match[1] && match[2] && match[3]) {
-      year = parseInt(match[1], 10);
-      month = parseInt(match[2], 10);
-      day = parseInt(match[3], 10);
-    } else {
-      // Pattern 2: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
-      match = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-      if (match && match[1] && match[2] && match[3]) {
-        day = parseInt(match[1], 10);
-        month = parseInt(match[2], 10);
-        year = parseInt(match[3], 10);
-      } else {
-        // Pattern 3: MM/YYYY or MM-YYYY
-        match = clean.match(/^(\d{1,2})[-/.](\d{4})$/);
-        if (match && match[1] && match[2]) {
-          month = parseInt(match[1], 10);
-          year = parseInt(match[2], 10);
-          day = 1;
-        } else {
-          // Pattern 4: YYYY/MM or YYYY-MM
-          match = clean.match(/^(\d{4})[-/.](\d{1,2})$/);
-          if (match && match[1] && match[2]) {
-            year = parseInt(match[1], 10);
-            month = parseInt(match[2], 10);
-            day = 1;
-          }
-        }
-      }
-    }
-
-    if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
+    if (!iso || !isValidExpiryDate(iso)) {
       return {
         isValid: false,
         error: `تنسيق تاريخ الصلاحية غير صالح: (${rawDate})`
       };
     }
 
-    const paddedMonth = month.toString().padStart(2, '0');
-    const paddedDay = day.toString().padStart(2, '0');
-    const normalized = `${year}-${paddedMonth}-${paddedDay}`;
+    const parts = iso.split('-');
+    const year = parseInt(parts[0] || '0', 10);
+    const month = parseInt(parts[1] || '0', 10);
+    const day = parseInt(parts[2] || '0', 10);
 
     // Check if expired
-    const expDate = new Date(year, month - 1, day);
+    const expDate = new Date(year, month - 1, day, 23, 59, 59);
     const now = new Date();
     const isExpired = expDate < now;
 
     return {
       isValid: true,
-      normalizedDate: normalized,
+      normalizedDate: iso,
       isExpired
     };
   }
