@@ -2,133 +2,233 @@
 
 import Redis, { RedisOptions } from "ioredis";
 
-let REDIS_URL = process.env.REDIS_URL ? process.env.REDIS_URL.trim().replace(/^['"]|['"]$/g, '') : "";
+export function sanitizeRedisUrl(url?: string): string {
+  if (!url || typeof url !== "string") {
+    return "[NOT_CONFIGURED]";
+  }
 
-class RedisConnectionManager {
+  const trimmed = url.trim().replace(/^['"]|['"]$/g, "");
+  if (!trimmed) {
+    return "[EMPTY]";
+  }
+
+  try {
+    if (trimmed.includes("://")) {
+      const parsed = new URL(trimmed);
+      const protocol = parsed.protocol || "redis:";
+      const host = parsed.hostname || "endpoint";
+      const port = parsed.port ? `:${parsed.port}` : "";
+      const pathname = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "";
+      const auth = parsed.username || parsed.password ? "***:***@" : "";
+      return `${protocol}//${auth}${host}${port}${pathname}`;
+    }
+    return trimmed.replace(/:\/\/([^@]+)@/, "://***:***@");
+  } catch {
+    return trimmed.replace(/:([^\/@:]+)@/, ":***@").replace(/\/\/[^@]+@/, "//***@");
+  }
+}
+
+interface MemoryCacheEntry {
+  value: string;
+  expiresAt: number;
+}
+
+export class RedisConnectionManager {
   private static instance: Redis | null = null;
-  private static isMemoryFallback = !REDIS_URL;
-  private static memoryCache: Map<string, { value: string; expiresAt: number }> = new Map();
+  private static isConnected = false;
+  private static localMemoryStore = new Map<string, MemoryCacheEntry>();
+  private static readonly MAX_ENTRIES = 10000;
+  private static cleanupInterval: NodeJS.Timeout | null = null;
 
-  /**
-   * Returns a singleton Redis connection pool or fallback memory client.
-   */
-  static getClient(): Redis | null {
-    if (this.isMemoryFallback) {
-      return null;
-    }
-
-    if (this.instance) {
-      return this.instance;
-    }
-
-    try {
-      console.log(`[REDIS] Attempting to connect to instance: ${REDIS_URL}`);
-      
-      const options: RedisOptions = {
-        maxRetriesPerRequest: 3,
-        enableOfflineQueue: true,
-        reconnectOnError: (err) => {
-          const targetError = "READONLY";
-          if (err.message.slice(0, targetError.length) === targetError) {
-            return true;
-          }
-          return false;
-        },
-        retryStrategy: (times) => {
-          // Retry reconnecting with backoff up to 2 seconds, but stop after 3 attempts to fall back
-          if (times > 3) {
-            console.warn("[REDIS] Reached retry margin threshold. Activating secure in-memory backup distributed mock.");
-            this.isMemoryFallback = true;
-            return null; // Stop reconnecting and trigger fallback
-          }
-          return Math.min(times * 100, 2000);
-        }
-      };
-
-      this.instance = new Redis(REDIS_URL, options);
-
-      // Register error listener immediately to prevent unhandled socket error crashes on startup
-      this.instance.on("error", (err) => {
-        console.warn("[REDIS] Background adapter socket notice:", err.message);
-        // Do not crash the node process under any condition. Fallback activates through retryStrategy or direct exception catch
-      });
-
-      this.instance.on("connect", () => {
-        console.log("[REDIS] Handshake succeeded. Distributed connection established.");
-        this.isMemoryFallback = false;
-      });
-
-      return this.instance;
-    } catch (e) {
-      console.warn("[REDIS] Initialization failed. Falling back to high-speed local memory lock array.", e);
-      this.isMemoryFallback = true;
-      return null;
+  static {
+    // Periodic garbage collector for expired local memory keys
+    if (typeof setInterval !== "undefined") {
+      this.cleanupInterval = setInterval(() => {
+        RedisConnectionManager.evictExpired();
+      }, 60000);
+      if (this.cleanupInterval?.unref) {
+        this.cleanupInterval.unref();
+      }
     }
   }
 
+  private static get REDIS_URL(): string {
+    return process.env.REDIS_URL ? process.env.REDIS_URL.trim().replace(/^['"]|['"]$/g, "") : "";
+  }
+
+  static get isMemoryFallback(): boolean {
+    return !this.REDIS_URL || !this.isConnected;
+  }
+
+  static getStatus(): "REDIS_AVAILABLE" | "REDIS_FALLBACK_MEMORY_MODE" {
+    return this.isConnected ? "REDIS_AVAILABLE" : "REDIS_FALLBACK_MEMORY_MODE";
+  }
+
   /**
-   * Executes a command on Redis or falls back to in-memory commands safely.
+   * Returns a singleton Redis connection pool or null in memory fallback.
    */
-  static async set(key: string, value: string, mode?: "PX" | "EX", ttl?: number): Promise<boolean> {
-    const redis = this.getClient();
-    if (redis && !this.isMemoryFallback) {
+  static getClient(): Redis | null {
+    if (!this.REDIS_URL) {
+      return null;
+    }
+
+    if (!this.instance) {
       try {
-        if (mode && ttl) {
-          await (redis as any).set(key, value, mode, ttl);
-        } else {
-          await redis.set(key, value);
-        }
-        return true;
-      } catch (err) {
-        console.warn("[REDIS] SET command failed, falling back to local block.", err);
+        const sanitized = sanitizeRedisUrl(this.REDIS_URL);
+        console.log(`[REDIS] Initializing connection to: ${sanitized}`);
+
+        const options: RedisOptions = {
+          maxRetriesPerRequest: 2,
+          enableOfflineQueue: false,
+          connectTimeout: 5000,
+          lazyConnect: false,
+          reconnectOnError: (err) => {
+            if (err.message && err.message.slice(0, 8) === "READONLY") {
+              return true;
+            }
+            return false;
+          },
+          retryStrategy: (times) => {
+            if (times > 3) {
+              console.warn("[REDIS] Exceeded retry margin. Operating in process-local memory fallback mode.");
+              this.isConnected = false;
+              return null;
+            }
+            return Math.min(times * 300, 2000);
+          }
+        };
+
+        this.instance = new Redis(this.REDIS_URL, options);
+
+        this.instance.on("error", (err) => {
+          console.warn("[REDIS] Socket notice:", err?.message || err);
+          this.isConnected = false;
+        });
+
+        this.instance.on("connect", () => {
+          this.isConnected = true;
+          console.log(`[REDIS] REDIS_AVAILABLE (Connected to ${sanitizeRedisUrl(this.REDIS_URL)})`);
+        });
+
+        this.instance.on("ready", () => {
+          this.isConnected = true;
+        });
+
+        this.instance.on("close", () => {
+          this.isConnected = false;
+        });
+      } catch (err: any) {
+        console.warn("[REDIS] Initialization failed. Falling back to in-memory store.", err?.message || err);
+        this.instance = null;
+        this.isConnected = false;
       }
     }
 
-    // Memory storage fallback
-    const expiresAt = ttl ? Date.now() + (mode === "EX" ? ttl * 1000 : ttl) : Infinity;
-    this.memoryCache.set(key, { value, expiresAt });
+    return this.isConnected ? this.instance : null;
+  }
+
+  /**
+   * Safe SET command supporting EX/PX TTL and NX (Set if Not Exists)
+   */
+  static async set(key: string, value: string, mode?: "PX" | "EX", ttl?: number, nx?: boolean): Promise<boolean> {
+    const redis = this.getClient();
+    if (redis && this.isConnected) {
+      try {
+        if (nx) {
+          if (mode && ttl) {
+            const res = await (redis as any).set(key, value, mode, ttl, "NX");
+            return res === "OK";
+          } else {
+            const res = await (redis as any).set(key, value, "NX");
+            return res === "OK";
+          }
+        } else {
+          if (mode && ttl) {
+            await (redis as any).set(key, value, mode, ttl);
+          } else {
+            await redis.set(key, value);
+          }
+          return true;
+        }
+      } catch (err) {
+        console.warn("[REDIS] SET command failed, falling back to local memory store.", err);
+      }
+    }
+
+    // In-memory fallback
+    const now = Date.now();
+    const existing = this.localMemoryStore.get(key);
+
+    if (nx && existing && existing.expiresAt > now) {
+      return false;
+    }
+
+    if (this.localMemoryStore.size >= this.MAX_ENTRIES) {
+      this.evictExpired();
+      if (this.localMemoryStore.size >= this.MAX_ENTRIES) {
+        const keysToEvict = Array.from(this.localMemoryStore.keys()).slice(0, 1000);
+        for (const k of keysToEvict) {
+          this.localMemoryStore.delete(k);
+        }
+      }
+    }
+
+    let expiresAt = Infinity;
+    if (ttl && ttl > 0) {
+      expiresAt = mode === "EX" ? now + ttl * 1000 : now + ttl;
+    }
+
+    this.localMemoryStore.set(key, { value, expiresAt });
     return true;
   }
 
+  /**
+   * Safe GET command
+   */
   static async get(key: string): Promise<string | null> {
     const redis = this.getClient();
-    if (redis && !this.isMemoryFallback) {
+    if (redis && this.isConnected) {
       try {
         return await redis.get(key);
       } catch (err) {
-        console.warn("[REDIS] GET command failed, falling back to local block.", err);
+        console.warn("[REDIS] GET command failed, falling back to local memory store.", err);
       }
     }
 
-    const item = this.memoryCache.get(key);
-    if (!item) return null;
-    if (item.expiresAt < Date.now()) {
-      this.memoryCache.delete(key);
+    const entry = this.localMemoryStore.get(key);
+    if (!entry) return null;
+
+    if (entry.expiresAt <= Date.now()) {
+      this.localMemoryStore.delete(key);
       return null;
     }
-    return item.value;
+
+    return entry.value;
   }
 
+  /**
+   * Safe DEL command
+   */
   static async del(key: string): Promise<boolean> {
     const redis = this.getClient();
-    if (redis && !this.isMemoryFallback) {
+    if (redis && this.isConnected) {
       try {
         await redis.del(key);
         return true;
       } catch (err) {
-        console.warn("[REDIS] DEL command failed, falling back to local block.", err);
+        console.warn("[REDIS] DEL command failed, falling back to local memory store.", err);
       }
     }
 
-    return this.memoryCache.delete(key);
+    return this.localMemoryStore.delete(key);
   }
 
   /**
-   * Helper to execute key scanning
+   * Pattern scan keys
    */
   static async scanKeys(pattern: string): Promise<string[]> {
     const redis = this.getClient();
-    if (redis && !this.isMemoryFallback) {
+    if (redis && this.isConnected) {
       try {
         let keys: string[] = [];
         let cursor = "0";
@@ -139,49 +239,89 @@ class RedisConnectionManager {
         } while (cursor !== "0");
         return keys;
       } catch (err) {
-        console.warn("[REDIS] SCAN command failed, scanning local memory array.", err);
+        console.warn("[REDIS] SCAN command failed, scanning local memory store.", err);
       }
     }
 
-    // Memory scan
-    const keys: string[] = [];
     const now = Date.now();
-    const cleanPattern = pattern.replace(/\*/g, ""); // simple match for mock demo
-    for (const [k, v] of this.memoryCache.entries()) {
-      if (k.includes(cleanPattern) && v.expiresAt > now) {
-        keys.push(k);
+    const results: string[] = [];
+    const escaped = pattern.replace(/[-[\]{}()+?.,\\^$|#\s]/g, "\\$&").replace(/\*/g, ".*");
+    const regex = new RegExp(`^${escaped}$`);
+
+    for (const [key, entry] of this.localMemoryStore.entries()) {
+      if (entry.expiresAt > now) {
+        if (regex.test(key)) {
+          results.push(key);
+        }
+      } else {
+        this.localMemoryStore.delete(key);
       }
     }
-    return keys;
+
+    return results;
   }
 
   /**
-   * Atomic evaluate script implementation (e.g. for Redlock release)
+   * Evaluates Lua script on Redis, or handles token-verified Mutex evaluation locally
    */
   static async eval(script: string, numKeys: number, ...args: string[]): Promise<any> {
     const redis = this.getClient();
-    if (redis && !this.isMemoryFallback) {
+    if (redis && this.isConnected) {
       try {
         return await redis.eval(script, numKeys, ...args);
       } catch (err) {
-        console.warn("[REDIS] Lua evaluation failed, implementing custom fallback evaluation.", err);
+        console.warn("[REDIS] Lua evaluation failed, evaluating local process-local mutex.", err);
       }
     }
 
-    // Fallback Mock Lua evaluation logic:
-    // In many redis locking Lua scripts:
-    // args[0] = lockKey, args[1] = lockValue/token.
-    // Script checks if redis.call('get', KEYS[1]) == ARGV[1] then returns redis.call('del', KEYS[1]) else returns 0.
     const key = args[0] || "";
     const token = args[1] || "";
-    const cached = this.memoryCache.get(key);
-    if (cached && cached.value === token) {
-      this.memoryCache.delete(key);
-      return 1;
+    const entry = this.localMemoryStore.get(key);
+    const now = Date.now();
+
+    if (entry && entry.expiresAt <= now) {
+      this.localMemoryStore.delete(key);
     }
+
+    const currentVal = entry && entry.expiresAt > now ? entry.value : null;
+
+    // Mutex Release
+    if (script.includes("del") && script.includes("get")) {
+      if (currentVal === token) {
+        this.localMemoryStore.delete(key);
+        return 1;
+      }
+      return 0;
+    }
+
+    // Mutex Extend
+    if (script.includes("pexpire") || script.includes("expire")) {
+      const ttlMs = parseInt(args[2] || "0", 10);
+      if (currentVal === token && ttlMs > 0) {
+        this.localMemoryStore.set(key, {
+          value: currentVal,
+          expiresAt: Date.now() + ttlMs
+        });
+        return 1;
+      }
+      return 0;
+    }
+
     return 0;
+  }
+
+  static async clear(): Promise<void> {
+    this.localMemoryStore.clear();
+  }
+
+  private static evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.localMemoryStore.entries()) {
+      if (entry.expiresAt <= now) {
+        this.localMemoryStore.delete(key);
+      }
+    }
   }
 }
 
 export default RedisConnectionManager;
-export { RedisConnectionManager };

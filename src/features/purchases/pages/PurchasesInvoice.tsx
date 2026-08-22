@@ -728,6 +728,7 @@ const PurchasesInvoice: React.FC<{ onNavigate?: (view: string, params?: Record<s
           applyAndSaveSmartImport(approvedRows, supplier, invNum, date);
         }}
         availableProducts={filteredProducts}
+        availableSuppliers={filteredSuppliers || suppliers}
       />
 
       {/* ADD ITEM POP-UP MODAL */}

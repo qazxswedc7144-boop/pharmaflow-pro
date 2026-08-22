@@ -5,7 +5,18 @@ import { prisma } from "../../database/prisma";
 import { RedisConnectionManager } from "../../database/redis";
 import { BackendLockAcquisitionOptions, RedisLockRecord } from "./locking.types";
 
+/**
+ * LockingService provides concurrency synchronization.
+ *
+ * GUARANTEES & HIERARCHY:
+ * - When Redis is connected: Provides distributed lock semantics across multiple server pods.
+ * - When in Memory Fallback: Provides process-local mutex semantics for the current container.
+ * - Authoritative Cross-Instance Safety: All financial postings, invoice states, inventory
+ *   FIFO deductions, and idempotency locks are authoritatively enforced at the PostgreSQL
+ *   database transaction layer (ACID transactions, SELECT FOR UPDATE row locks, unique constraints).
+ */
 export class LockingService {
+
   private static LUA_RELEASE = `
     if redis.call("get", KEYS[1]) == ARGV[1] then
       return redis.call("del", KEYS[1])
@@ -43,7 +54,7 @@ export class LockingService {
     const expiresAt = new Date(now.getTime() + ttl);
 
     // Write to Redis with NX option (Set if not exists)
-    const success = await RedisConnectionManager.set(redisKey, lockId, "PX", ttl);
+    const success = await RedisConnectionManager.set(redisKey, lockId, "PX", ttl, true);
     if (!success) {
       return null;
     }
@@ -106,7 +117,7 @@ export class LockingService {
    */
   static async extendLock(key: string, lockId: string, branchId: string, ttl: number, userId = "SYSTEM"): Promise<boolean> {
     const redisKey = this.makeLockKey(key, branchId);
-    const result = await RedisConnectionManager.eval(this.LUA_EXTEND, 1, redisKey, String(ttl));
+    const result = await RedisConnectionManager.eval(this.LUA_EXTEND, 1, redisKey, lockId, String(ttl));
     const extended = result === 1;
 
     if (extended) {

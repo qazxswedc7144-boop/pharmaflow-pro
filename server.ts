@@ -110,10 +110,11 @@ async function startServer() {
     }, 100);
   }
 
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const isDev = process.env.NODE_ENV !== "production";
+  const PORT = isDev ? 3000 : (process.env.PORT ? parseInt(process.env.PORT, 10) : 8080);
   
   // Clean up any stale processes that might be holding onto the port or 24678 in development
-  if (process.env.NODE_ENV !== "production") {
+  if (isDev) {
     killStaleProcesses(PORT);
     killStaleProcesses(24678);
   }
@@ -437,6 +438,20 @@ async function startServer() {
     });
   });
 
+  // If running on a custom Cloud Run port (e.g. 8080), also attach a secondary listener on 3000 for internal compatibility if free
+  if (PORT !== 3000) {
+    try {
+      const secondaryServer = app.listen(3000, "0.0.0.0", () => {
+        console.log("[BOOT] Secondary listener open on http://0.0.0.0:3000");
+      });
+      secondaryServer.on("error", (err: any) => {
+        console.log("[BOOT] Secondary listener note (port 3000):", err?.message || err);
+      });
+    } catch (err: any) {
+      console.log("[BOOT] Secondary listener init note:", err?.message || err);
+    }
+  }
+
   // Graceful shutdown handling for active listener
   const gracefulShutdown = (signal: string) => {
     console.log(`[SERVER] Received ${signal} signal. Shutting down server gracefully...`);
@@ -458,12 +473,8 @@ async function startServer() {
     console.error("❌ Express server listener error:", detail);
     if (errVal?.code === "EADDRINUSE") {
       console.warn(`⚠️ Port ${PORT} is in use. Waiting for port release or process re-attachment...`);
-      setTimeout(() => {
-        process.exit(1);
-      }, 2000);
       return;
     }
-    process.exit(1);
   });
 }
 

@@ -110,11 +110,21 @@ export class ProductMatchingEngine {
     }
 
     // Tier 5: Learned Alias Match
-    if (learnedAliases[rawName]) {
-      const targetName = learnedAliases[rawName];
-      const aliasMatch = products.find(p => (p.name || p.Name || '') === targetName);
-      if (aliasMatch) {
-        return { product: aliasMatch, matchType: 'ALIAS', score: 0.92 };
+    if (learnedAliases) {
+      const target = learnedAliases[rawName] || learnedAliases[normInput];
+      if (target) {
+        const targetNorm = ColumnIntelligence.normalizeHeader(target);
+        const aliasMatch = products.find(p => {
+          const pName = p.name || p.Name || '';
+          return (
+            pName.toLowerCase() === target.toLowerCase() ||
+            p.id === target ||
+            ColumnIntelligence.normalizeHeader(pName) === targetNorm
+          );
+        });
+        if (aliasMatch) {
+          return { product: aliasMatch, matchType: 'ALIAS', score: 0.92 };
+        }
       }
     }
 

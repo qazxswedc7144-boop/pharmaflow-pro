@@ -19,9 +19,6 @@ export default defineConfig(({ mode }) => {
         tailwindcss()
       ],
       base: '/',
-      define: {
-        'process.env.GEMINI_API_KEY': JSON.stringify(process.env.GEMINI_API_KEY || "")
-      },
       assetsInclude: ['**/*.png', '**/*.jpg', '**/*.svg', '**/*.PNG', '**/*.JPG', '**/*.JPEG', '**/*.jpeg'],
       resolve: {
         alias: {

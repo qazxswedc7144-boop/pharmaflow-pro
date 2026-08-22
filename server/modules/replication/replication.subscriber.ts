@@ -4,6 +4,7 @@ import Redis, { RedisOptions } from "ioredis";
 import { prisma } from "../../database/prisma";
 import { localReplicationBus } from "./replication.publisher";
 import { ReplicationEvent } from "./replication.types";
+import { sanitizeRedisUrl } from "../../database/redis";
 
 let REDIS_URL = process.env.REDIS_URL ? process.env.REDIS_URL.trim().replace(/^['"]|['"]$/g, '') : "";
 
@@ -49,9 +50,9 @@ export class ReplicationSubscriber {
 
       // 2. Initialize Redis Subscription client
       if (!REDIS_URL) {
-        console.warn("[REPLICATION_SUBSCRIBER] No REDIS_URL configured, skipping Redis subscriber.");
+        console.warn("[REPLICATION_SUBSCRIBER] No REDIS_URL configured; operating in local in-memory event bus mode.");
       } else {
-        console.log(`[REPLICATION_SUBSCRIBER] Connecting to Pub/Sub on: ${REDIS_URL}`);
+        console.log(`[REPLICATION_SUBSCRIBER] Connecting to Pub/Sub on: ${sanitizeRedisUrl(REDIS_URL)}`);
         const options: RedisOptions = {
           maxRetriesPerRequest: null,
           enableOfflineQueue: true,
