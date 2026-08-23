@@ -162,32 +162,23 @@ export class AliasNormalization {
   static normalizeSupplierName(name: string): string {
     let norm = this.normalize(name);
 
-    // Remove common corporate suffixes in Arabic and English
-    const suffixes = [
-      /\bcompany\b/gi,
-      /\bco\b/gi,
-      /\bcorp\b/gi,
-      /\binc\b/gi,
-      /\bltd\b/gi,
-      /\bllc\b/gi,
-      /\bpharmaceuticals\b/gi,
-      /\bpharma\b/gi,
-      /\bindustries\b/gi,
-      /\bdistributors\b/gi,
-      /\bstore\b/gi,
-      /\bشركة\b/gi,
-      /\bمؤسسة\b/gi,
-      /\bللادوية\b/gi,
-      /\bللتجارة\b/gi,
-      /\bوالتوكيلات\b/gi,
-      /\bالمحدودة\b/gi
-    ];
+    // Remove common corporate suffixes in Arabic (normalized letters) and English
+    const stopWords = new Set([
+      'company', 'co', 'corp', 'inc', 'ltd', 'llc', 'pharmaceuticals', 'pharma', 
+      'industries', 'distributors', 'store', 'group',
+      'شركه', 'مؤسسه', 'للادويه', 'للتجاره', 'والتوكيلات', 'المحدوده', 'مجموعه',
+      'ادويه', 'تجاره', 'محدوده'
+    ]);
 
-    for (const suffix of suffixes) {
-      norm = norm.replace(suffix, ' ');
-    }
+    const tokens = norm.split(' ').filter(token => token && !stopWords.has(token));
+    return tokens.join(' ').trim();
+  }
 
-    return norm.replace(/\s+/g, ' ').trim();
+  /**
+   * Alias for normalizeSupplierName
+   */
+  static normalizeSupplier(name: string): string {
+    return this.normalizeSupplierName(name);
   }
 
   /**
@@ -206,7 +197,7 @@ export class AliasNormalization {
     const dosageRegex = /(\d+(?:\.\d+)?)\s*(mg|g|mcg|ml|iu|gm|%|ug|مجم|ملجم|جم|مل|مكجم)/i;
     const dosageMatch = rawText.match(dosageRegex) || normalizedText.match(dosageRegex);
 
-    if (dosageMatch) {
+    if (dosageMatch && dosageMatch[1] && dosageMatch[2]) {
       const val = parseFloat(dosageMatch[1]);
       let unit = dosageMatch[2].toLowerCase();
 
@@ -255,13 +246,21 @@ export class AliasNormalization {
     const packRegex = /(?:pack\s*of|\bx|\*|\bstrip\s*of)\s*(\d+)|\b(\d+)\s*(?:tabs?|caps?|amp|sachets?|ق)/i;
     const packMatch = rawText.match(packRegex);
     if (packMatch) {
-      const pSize = parseInt(packMatch[1] || packMatch[2], 10);
+      const rawNum = packMatch[1] || packMatch[2] || '';
+      const pSize = parseInt(rawNum, 10);
       if (!isNaN(pSize) && pSize > 0 && pSize <= 1000) {
         result.packSize = pSize;
       }
     }
 
     return result;
+  }
+
+  /**
+   * Alias for extractPharmaceuticalInfo
+   */
+  static extractStrengthAndForm(text: string): NormalizedPharmaceuticalInfo {
+    return this.extractPharmaceuticalInfo(text);
   }
 
   /**

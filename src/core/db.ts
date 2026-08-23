@@ -205,6 +205,13 @@ export class PharmaFlowDB extends Dexie {
   projectionCheckpoints!: Table<any>;
   projectionEvents!: Table<any>;
 
+  // Phase 2.3 - Smart Import Alias Learning Tables
+  supplierAliases!: Table<any>;
+  productAliases!: Table<any>;
+  supplierProductReferences!: Table<any>;
+  aliasRejections!: Table<any>;
+  aliasAuditLogs!: Table<any>;
+
   // Legacy support for code that uses db.db
   get db(): PharmaFlowDB { return this; }
 
@@ -376,6 +383,15 @@ export class PharmaFlowDB extends Dexie {
       products: '&id, name, Name, barcode, sku, ProductID, categoryId, supplierId, is_active, Is_Active, stock, StockQuantity, updatedAt, tenantId, [tenantId+id], [tenantId+barcode], [tenantId+sku], [tenantId+categoryId], [tenantId+name], [tenantId+Name]',
       customers: '&id, name, Name, phone, email, is_active, Is_Active, tenantId, [tenantId+id], [tenantId+phone]',
       suppliers: '&id, name, Name, phone, email, is_active, Is_Active, tenantId, [tenantId+id], [tenantId+phone]'
+    });
+
+    // Version 29: Phase 2.3 - Smart Import Alias Learning System Multi-Tenant Schema & Indexes
+    this.version(29).stores({
+      supplierAliases: '&id, tenantId, branchId, supplierId, aliasNormalized, [tenantId+supplierId+aliasNormalized], [tenantId+aliasNormalized]',
+      productAliases: '&id, tenantId, branchId, supplierId, productId, aliasNormalized, isGlobal, [tenantId+supplierId+aliasNormalized], [tenantId+aliasNormalized], [tenantId+productId]',
+      supplierProductReferences: '&id, tenantId, supplierId, productId, supplierProductCode, [tenantId+supplierId+supplierProductCode], [tenantId+productId]',
+      aliasRejections: '&id, tenantId, supplierId, aliasNormalized, rejectedProductId, [tenantId+supplierId+aliasNormalized+rejectedProductId], [tenantId+rejectedProductId]',
+      aliasAuditLogs: '&id, tenantId, timestamp, action, aliasType, supplierId, productId, [tenantId+timestamp]'
     });
 
     // Handle structural integrity and recovery

@@ -4,8 +4,10 @@ import { SpreadsheetParser } from './spreadsheetParser';
 import { ColumnIntelligence } from './columnIntelligence';
 import { DataValidator } from './dataValidator';
 import { ProductMatchingEngine } from './productMatchingEngine';
-import { OCRDocumentParser } from './ocrDocumentParser';
 import { ParserRegistry, DocxParserAdapter } from './parsers';
+import { MultiStagePipeline } from './providers/multiStagePipeline';
+import { ConfidenceEngine } from './confidence/confidenceEngine';
+import { SelfHealingEngine } from './selfHealing/selfHealingEngine';
 import { 
   ImportAnalysisResult, 
   ExtractedImportRow, 
@@ -21,6 +23,21 @@ import { normalizeToISODate } from '@/utils/expiryUtils';
 
 export class SmartImportOrchestrator {
   /**
+   * Alias for analyzeInvoice
+   */
+  static async analyzeFile(
+    file: File | string,
+    options: {
+      tenantId?: string;
+      branchId?: string;
+      onProgress?: SmartImportProgressCallback;
+      forceReprocess?: boolean;
+    } = {}
+  ): Promise<ImportAnalysisResult> {
+    return this.analyzeInvoice(file, options);
+  }
+
+  /**
    * Main pipeline entry point: analyzes uploaded invoice file, DOCX, spreadsheet, PDF, or camera capture
    */
   static async analyzeInvoice(
@@ -29,10 +46,11 @@ export class SmartImportOrchestrator {
       tenantId?: string;
       branchId?: string;
       onProgress?: SmartImportProgressCallback;
+      forceReprocess?: boolean;
     } = {}
   ): Promise<ImportAnalysisResult> {
     const startTime = Date.now();
-    const { onProgress } = options;
+    const { onProgress, forceReprocess } = options;
 
     const user = authService.getCurrentUser();
     const tenantId = options.tenantId || (user as any)?.tenantId || 'DEFAULT_TENANT';
@@ -54,73 +72,37 @@ export class SmartImportOrchestrator {
       details: `Smart Import started for source ${validation.sourceType} (${validation.fileName})`
     });
 
+    // 2. Multi-Stage Pipeline Execution
+    const pipelineResult = await MultiStagePipeline.execute(file, {
+      tenantId,
+      branchId,
+      userId,
+      forceReprocess,
+      onProgress: (pct, msg) => {
+        const stage = pct < 30 ? 'PARSING_DOCUMENT' : pct < 60 ? 'DETECTING_COLUMNS' : 'EXTRACTING_ROWS';
+        onProgress?.(stage, pct, msg);
+      }
+    });
+
+    const canonicalDoc = pipelineResult.canonicalDoc;
+    const detectedSupplier = canonicalDoc.documentFields.supplierName;
+    const detectedInvoiceNumber = canonicalDoc.documentFields.invoiceNumber;
+    const detectedDate = canonicalDoc.documentFields.invoiceDate;
+    const rawText = canonicalDoc.documentFields.notes || pipelineResult.confidenceReport?.summary;
+
     let detectedColumns: ColumnDefinition[] = [];
     let headerRowIndex = 0;
     let rawExtractedRows: Partial<ExtractedImportRow>[] = [];
-    let detectedSupplier: string | undefined = undefined;
-    let detectedInvoiceNumber: string | undefined = undefined;
-    let detectedDate: string | undefined = undefined;
-    let rawText: string | undefined = undefined;
 
-    // 2. Routing to appropriate parser adapter
-    if (validation.sourceType === 'DOCX') {
-      onProgress?.('PARSING_DOCUMENT', 30, 'جاري قراءة وتحليل جداول ملف Word (.docx)...');
-      const docxParser = new DocxParserAdapter();
-      const canonicalDoc = await docxParser.parse(file, {
-        tenantId,
-        branchId,
-        userId,
-        onProgress: (pct, msg) => onProgress?.('PARSING_DOCUMENT', pct, msg)
-      });
-
-      const primaryTable = canonicalDoc.tables.find(t => t.isPrimaryInvoiceTable) || canonicalDoc.tables[0];
-      if (!primaryTable || primaryTable.rows.length === 0) {
-        throw new Error('لم يتم العثور على أي جداول بيانات صالحة داخل ملف Word.');
-      }
-
-      // Synthesize column definitions from headers
+    // Parse columns from canonical document
+    const primaryTable = canonicalDoc.tables.find(t => t.isPrimaryInvoiceTable) || canonicalDoc.tables[0];
+    if (primaryTable && primaryTable.headers && primaryTable.headers.length > 0) {
       const sampleValues = primaryTable.rows.slice(0, 5).map(r => r.rawCells?.map(c => String(c || '')) || []);
       const samplesByCol: string[][] = primaryTable.headers.map((_, colIdx) => 
         sampleValues.map(row => row[colIdx] || '').filter(Boolean)
       );
-
       detectedColumns = ColumnIntelligence.analyzeHeaders(primaryTable.headers, samplesByCol);
-
-      // Extract rows from primary table
-      const grid = [
-        primaryTable.headers,
-        ...primaryTable.rows.map(r => (r.rawCells ? r.rawCells.map(c => String(c ?? '')) : Object.values(r.cells).map(c => String(c ?? ''))))
-      ];
-      headerRowIndex = 0;
-      rawExtractedRows = this.extractRowsFromGrid(grid, 0, detectedColumns);
-    } else if (validation.sourceType === 'EXCEL' || validation.sourceType === 'CSV') {
-      onProgress?.('PARSING_DOCUMENT', 30, 'جاري قراءة وتحليل بيانات الجدول وجداول المورد...');
-      const grid = await SpreadsheetParser.parseFileToGrid(file as File);
-      
-      if (!grid || grid.length === 0) {
-        throw new Error('ملف الجدول فارغ أو لم يتم العثور على أسطر صالحة.');
-      }
-
-      // Detect Table Headers (even if starting after row 10)
-      onProgress?.('DETECTING_COLUMNS', 45, 'جاري التعرف على الأعمدة وتصفية الحقول غير الضرورية...');
-      const headerDetection = SpreadsheetParser.findTableHeaders(grid);
-      headerRowIndex = headerDetection.headerRowIndex;
-      detectedColumns = headerDetection.columnDefs;
-
-      // Extract rows beneath header
-      onProgress?.('EXTRACTING_ROWS', 60, `جاري استخراج الأصناف والكميات والأسعار (${grid.length - headerRowIndex - 1} سطر)...`);
-      rawExtractedRows = this.extractRowsFromGrid(grid, headerRowIndex, detectedColumns);
     } else {
-      // Image or PDF OCR
-      onProgress?.('PARSING_DOCUMENT', 35, 'جاري المسح الضوئي الذكي وقراءة بنية الفاتورة...');
-      const ocrResult = await OCRDocumentParser.parseDocument(file);
-      rawExtractedRows = ocrResult.rows;
-      detectedSupplier = ocrResult.supplier;
-      detectedInvoiceNumber = ocrResult.invoiceNumber;
-      detectedDate = ocrResult.date;
-      rawText = ocrResult.rawText;
-
-      // Synthesize detected columns for preview UI
       detectedColumns = [
         { index: 0, rawHeader: 'اسم الصنف', normalizedHeader: 'اسم الصنف', mappedField: 'productName', confidence: 99, isAutoMapped: true, sampleValues: [] },
         { index: 1, rawHeader: 'الكمية', normalizedHeader: 'الكمية', mappedField: 'quantity', confidence: 98, isAutoMapped: true, sampleValues: [] },
@@ -130,6 +112,8 @@ export class SmartImportOrchestrator {
         { index: 5, rawHeader: 'التشغيلة', normalizedHeader: 'التشغيلة', mappedField: 'batchNumber', confidence: 90, isAutoMapped: true, sampleValues: [] }
       ];
     }
+
+    rawExtractedRows = MultiStagePipeline.extractRowsFromCanonicalDoc(canonicalDoc);
 
     if (rawExtractedRows.length === 0) {
       throw new Error('لم يتم العثور على أي أصناف مقروءة في المستند.');
@@ -147,13 +131,47 @@ export class SmartImportOrchestrator {
     });
 
     // Enrich with product matching
-    const finalEnrichedRows = ProductMatchingEngine.matchAllRows(validatedRows, dbProducts);
+    const matchedRows = ProductMatchingEngine.matchAllRows(validatedRows, dbProducts);
+
+    // 5. Apply Field-Level Self-Healing and Explainable Multi-Field Confidence Scoring
+    let healedCount = 0;
+    const finalEnrichedRows: ExtractedImportRow[] = matchedRows.map(row => {
+      const healing = SelfHealingEngine.healRow(row);
+      const rowConf = ConfidenceEngine.scoreRow(healing.healedRow);
+
+      if (healing.healingResult.isModified) {
+        healedCount++;
+      }
+
+      return {
+        ...healing.healedRow,
+        isHealed: healing.healingResult.isModified,
+        healingExplanations: healing.healingResult.explanations,
+        fieldConfidence: {
+          productName: { score: rowConf.productNameConfidence.score, level: rowConf.productNameConfidence.level, reasons: rowConf.productNameConfidence.reasons },
+          quantity: { score: rowConf.quantityConfidence.score, level: rowConf.quantityConfidence.level, reasons: rowConf.quantityConfidence.reasons },
+          unitPrice: { score: rowConf.unitPriceConfidence.score, level: rowConf.unitPriceConfidence.level, reasons: rowConf.unitPriceConfidence.reasons },
+          total: { score: rowConf.totalConfidence.score, level: rowConf.totalConfidence.level, reasons: rowConf.totalConfidence.reasons },
+          expiryDate: { score: rowConf.expiryDateConfidence.score, level: rowConf.expiryDateConfidence.level, reasons: rowConf.expiryDateConfidence.reasons },
+          barcode: { score: rowConf.barcodeConfidence.score, level: rowConf.barcodeConfidence.level, reasons: rowConf.barcodeConfidence.reasons },
+          batchNumber: { score: rowConf.batchNumberConfidence.score, level: rowConf.batchNumberConfidence.level, reasons: rowConf.batchNumberConfidence.reasons }
+        }
+      };
+    });
 
     // Compute final summary
     const summary = DataValidator.generateSummary(finalEnrichedRows);
     summary.detectedSupplier = detectedSupplier;
     summary.detectedInvoiceNumber = detectedInvoiceNumber;
     summary.detectedDate = detectedDate;
+
+    // Phase 2.5 summary metrics
+    const docConfidence = ConfidenceEngine.scoreDocument(summary, finalEnrichedRows);
+    summary.confidenceScore = docConfidence.overallScore;
+    summary.confidenceLevel = docConfidence.overallLevel;
+    summary.healedRowsCount = healedCount;
+    summary.providerName = pipelineResult.activeProviderName;
+    summary.isFallbackActive = pipelineResult.isFallbackUsed;
 
     onProgress?.('READY_FOR_REVIEW', 100, 'اكتمل التحليل الذكي بنجاح!');
 
@@ -168,9 +186,13 @@ export class SmartImportOrchestrator {
         validRows: summary.validRowsCount,
         newProducts: summary.newProductCandidatesCount,
         totalAmount: summary.totalInvoiceAmount,
+        provider: pipelineResult.activeProviderName,
+        confidence: docConfidence.overallScore,
+        healedRows: healedCount,
+        isCached: pipelineResult.isCached,
         processingTimeMs
       },
-      details: `Smart Import analyzed: ${finalEnrichedRows.length} rows (${processingTimeMs}ms)`
+      details: `Smart Import analyzed: ${finalEnrichedRows.length} rows (${processingTimeMs}ms) via ${pipelineResult.activeProviderName}`
     });
 
     return {
@@ -182,12 +204,20 @@ export class SmartImportOrchestrator {
       rows: finalEnrichedRows,
       summary,
       rawText,
+      confidenceReport: docConfidence,
+      healingSummary: pipelineResult.healingSummary,
       metadata: {
         tenantId,
         branchId,
         userId,
         analyzedAt: new Date().toISOString(),
-        processingTimeMs
+        processingTimeMs,
+        providerType: pipelineResult.activeProvider,
+        providerName: pipelineResult.activeProviderName,
+        isCached: pipelineResult.isCached,
+        isFallbackUsed: pipelineResult.isFallbackUsed,
+        fallbackReason: pipelineResult.fallbackReason,
+        parserVersion: '2.5.0'
       }
     };
   }

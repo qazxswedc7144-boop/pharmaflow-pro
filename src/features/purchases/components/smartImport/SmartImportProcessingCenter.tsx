@@ -1,4 +1,9 @@
 // src/features/purchases/components/smartImport/SmartImportProcessingCenter.tsx
+/**
+ * PharmaFlow PRO ERP — Sovereign Enterprise Edition
+ * Phase 2.4: Unified Smart Import Review & Human Resolution UX
+ */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BatchProcessingSession, 
@@ -23,7 +28,9 @@ import {
   FileText, 
   Image as ImageIcon, 
   Camera, 
-  Edit3 
+  Edit3,
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 import { Modal } from '@/components/shared/SharedUI';
 import { useUIStore } from '@/store/useUIStore';
@@ -99,7 +106,9 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
       }
 
       switch (activeFilterTab) {
-        case 'UNRESOLVED':
+        case 'CONFLICTS':
+          return p.dosageSafety?.isConflict && !p.isSkipped;
+        case 'NEEDS_REVIEW':
           return p.action === ProductResolutionAction.UNRESOLVED && !p.isSkipped;
         case 'MATCHED':
           return (p.action === ProductResolutionAction.AUTO_MATCH || p.action === ProductResolutionAction.LINK_EXISTING) && !p.isSkipped;
@@ -161,7 +170,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
     if (!session) return;
     const updated = BatchProcessingOrchestrator.applyBulkAction(session, 'APPROVE_ALL_MATCHED');
     setSession(updated);
-    addToast('تم اعتماد المطابقات التلقائية بنجاح', 'success');
+    addToast('تم اعتماد المطابقات التلقائية الآمنة بنجاح', 'success');
   };
 
   const handleBulkCreateNew = () => {
@@ -263,12 +272,12 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
       isOpen={isOpen}
       onClose={handleCancel}
       title=""
-      maxWidth="max-w-[840px] w-[95vw]"
+      maxWidth="max-w-[880px] w-[95vw]"
       noPadding={true}
       centerOnMobile={true}
       showCloseButton={false}
     >
-      <div dir="rtl" className="flex flex-col max-h-[90vh] bg-white rounded-3xl overflow-hidden font-cairo select-none">
+      <div dir="rtl" className="flex flex-col max-h-[90vh] bg-white rounded-3xl overflow-hidden font-cairo select-none max-w-full">
         
         {/* HEADER BAR */}
         <div className="bg-[#1E4D4D] text-white px-4 py-3 flex items-center justify-between shadow-sm shrink-0">
@@ -278,21 +287,32 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-black tracking-wide">مركز المعالجة الدفعية للاستيراد الذكي</h2>
+                <h2 className="text-sm font-black tracking-wide">مركز المراجعة والقرارات للاستيراد الذكي</h2>
                 {analysisResult && (
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200 text-[10px] font-bold border border-emerald-400/30 flex items-center gap-1">
                     {getSourceIcon(analysisResult.sourceType)}
                     {analysisResult.sourceType}
                   </span>
                 )}
+                {analysisResult?.metadata.providerName && (
+                  <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-100 text-[10px] font-bold border border-teal-400/30 flex items-center gap-1">
+                    ⚡ {analysisResult.metadata.providerName}
+                  </span>
+                )}
+                {analysisResult?.metadata.isCached && (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200 text-[10px] font-bold border border-amber-400/30">
+                    💾 ذاكرة مؤقتة
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-emerald-100/80 font-medium truncate max-w-[280px] sm:max-w-md">
-                {analysisResult?.fileName || 'معالجة دفعية شاملة للمورد والأصناف وتوليد قيود المخزون'}
+                {analysisResult?.fileName || 'مركز مراجعة موحد للأصناف والمورد وأمان الجرعات الدوائية'}
               </p>
             </div>
           </div>
 
           <button 
+            id="btn-close-processing-center"
             onClick={handleCancel}
             className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95"
             title="إغلاق"
@@ -314,7 +334,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
             <div className="text-center space-y-1.5 max-w-sm">
               <h3 className="text-sm font-black text-[#1E4D4D]">{progressMessage}</h3>
               <p className="text-[11px] font-bold text-slate-400">
-                جاري مطابقة المورد والأصناف وتجهيز القرارات الدفعية...
+                جاري مطابقة المورد والأصناف وفحص الأمان الصيدلاني...
               </p>
             </div>
 
@@ -343,10 +363,17 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
               {/* Batch Summary & Filter Tabs */}
               <SmartImportBatchSummary
                 summary={session.summary}
+                supplierStatus={session.supplierDecision.status}
                 activeTab={activeFilterTab}
                 onTabChange={setActiveFilterTab}
                 searchTerm={searchTerm}
                 onSearchChange={setSearchTerm}
+                confidenceScore={analysisResult?.summary.confidenceScore}
+                confidenceLevel={analysisResult?.summary.confidenceLevel}
+                providerName={analysisResult?.metadata.providerName}
+                isCached={analysisResult?.metadata.isCached}
+                isFallbackActive={analysisResult?.metadata.isFallbackUsed}
+                healedRowsCount={analysisResult?.summary.healedRowsCount}
               />
 
               {/* Bulk Actions Toolbar */}
@@ -383,6 +410,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
             {/* FOOTER ACTIONS */}
             <div className="p-3 bg-white border-t border-slate-200 flex flex-col sm:flex-row gap-2 shrink-0">
               <button 
+                id="btn-apply-import-invoice"
                 type="button"
                 disabled={isApplying}
                 onClick={() => handleExecuteApply(false)}
@@ -394,12 +422,13 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
                   <Edit3 size={16} />
                 )}
                 <span>
-                  تطبيق وتعبئة الفاتورة للمراجعة ({session.summary.totalRows - session.summary.skippedCount} صنف)
+                  اعتماد القرارات وتعبئة الفاتورة ({session.summary.totalRows - session.summary.skippedCount} صنف)
                 </span>
               </button>
 
               {onApplyAndSaveImmediately && (
                 <button 
+                  id="btn-apply-and-save-immediately"
                   type="button"
                   disabled={isApplying}
                   onClick={() => handleExecuteApply(true)}
@@ -415,6 +444,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
               )}
 
               <button 
+                id="btn-cancel-processing-center"
                 type="button"
                 onClick={handleCancel}
                 disabled={isApplying}

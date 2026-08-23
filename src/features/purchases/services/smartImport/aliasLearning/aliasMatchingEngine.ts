@@ -29,7 +29,7 @@ export class AliasMatchingEngine {
     const supplierCodes = rows.map(r => r.productCode || '').filter(Boolean);
 
     const [supplierAliases, productAliasData] = await Promise.all([
-      SupplierAliasRepository.findAliasesBatch(tenantId, rawNames),
+      SupplierAliasRepository.findAliasesBatch(tenantId, []),
       ProductAliasRepository.preloadBatch(tenantId, supplierId, rawNames, supplierCodes)
     ]);
 
@@ -188,21 +188,23 @@ export class AliasMatchingEngine {
     }
 
     // -------------------------------------------------------------
-    // Tier 6: Normalized Name Match
+    // Tier 6: Exact / Normalized Name Match
     // -------------------------------------------------------------
     if (normInput) {
       const normMatch = products.find(p => {
-        const pNorm = AliasNormalization.normalize(p.name || p.Name || '');
-        return pNorm === normInput;
+        const pRaw = (p.name || p.Name || '').trim();
+        const pNorm = AliasNormalization.normalize(pRaw);
+        return pNorm === normInput || pRaw.toLowerCase() === rawName.toLowerCase();
       });
       if (normMatch && !isProductRejected(normMatch.id)) {
         const safety = validateSafety(normMatch);
         if (safety.isSafe) {
+          const isExact = (normMatch.name || normMatch.Name || '').trim().toLowerCase() === rawName.toLowerCase();
           return {
             productId: normMatch.id,
             productName: normMatch.name || normMatch.Name || '',
-            matchType: 'NORMALIZED',
-            confidence: 0.95,
+            matchType: isExact ? 'EXACT' : 'NORMALIZED',
+            confidence: isExact ? 1.0 : 0.95,
             isSupplierSpecific: false,
             safetyCheck: safety
           };

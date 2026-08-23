@@ -187,6 +187,11 @@ export interface ExtractedImportRow {
   isDuplicate?: boolean;
   duplicateReason?: string;
   isSkipped?: boolean;
+
+  // Phase 2.5: Field-Level Confidence & Self-Healing
+  fieldConfidence?: Record<string, { score: number; level: string; reasons: string[] }>;
+  isHealed?: boolean;
+  healingExplanations?: string[];
 }
 
 export interface ImportSummary {
@@ -200,6 +205,13 @@ export interface ImportSummary {
   detectedSupplier?: string;
   detectedInvoiceNumber?: string;
   detectedDate?: string;
+
+  // Phase 2.5 Summaries
+  confidenceScore?: number;
+  confidenceLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'BLOCKED';
+  healedRowsCount?: number;
+  providerName?: string;
+  isFallbackActive?: boolean;
 }
 
 export interface ImportAnalysisResult {
@@ -217,6 +229,18 @@ export interface ImportAnalysisResult {
     userId: string;
     analyzedAt: string;
     processingTimeMs: number;
+    providerType?: string;
+    providerName?: string;
+    isCached?: boolean;
+    isFallbackUsed?: boolean;
+    fallbackReason?: string;
+    parserVersion?: string;
+  };
+  confidenceReport?: any;
+  healingSummary?: {
+    healedRowCount: number;
+    healedFieldCount: number;
+    details: string[];
   };
 }
 

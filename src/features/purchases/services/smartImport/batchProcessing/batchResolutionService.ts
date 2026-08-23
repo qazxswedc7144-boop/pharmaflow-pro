@@ -14,6 +14,7 @@ import { BatchSessionService } from './batchSessionService';
 import { InvoiceItem, Product, Supplier } from '@/types';
 import { normalizeToISODate } from '@/utils/expiryUtils';
 import { auditLogService } from '@/services/audit/auditLog';
+import { AliasLearningService, AliasLearningSummary } from '../aliasLearning';
 
 export class BatchResolutionService {
   /**
@@ -296,6 +297,20 @@ export class BatchResolutionService {
       await executeUnit();
     }
 
+    // Step D: Structured Multi-Tenant Alias & Catalog Learning Engine (Phase 2.3)
+    let aliasSummary: AliasLearningSummary | undefined = undefined;
+    try {
+      aliasSummary = await AliasLearningService.learnFromBatchSession(session, {
+        ...context,
+        masterData: {
+          products: [...existingProducts, ...createdProducts],
+          suppliers: createdSupplier ? [...existingSuppliers, createdSupplier] : existingSuppliers
+        }
+      });
+    } catch (aliasErr) {
+      console.warn('[BatchResolutionService] Non-blocking alias learning exception:', aliasErr);
+    }
+
     const executionTimeMs = Date.now() - startTime;
     const appliedInvoiceNumber: string = session.summary.detectedInvoiceNumber || `INV-IMP-${Date.now()}`;
     const appliedDate: string = session.summary.detectedDate || new Date().toISOString().slice(0, 10);
@@ -316,7 +331,8 @@ export class BatchResolutionService {
       appliedInvoiceNumber,
       appliedDate,
       executionTimeMs,
-      idempotentReplay: false
+      idempotentReplay: false,
+      aliasLearningSummary: aliasSummary
     };
 
     // Record in Idempotency Service
