@@ -36,6 +36,7 @@ import { useUIStore } from '@/store/useUIStore';
 interface SmartImportProcessingCenterProps {
   isOpen: boolean;
   onClose: () => void;
+  onCancel?: () => void;
   analysisResult: ImportAnalysisResult | null;
   isLoading: boolean;
   progressStage?: string;
@@ -50,6 +51,7 @@ interface SmartImportProcessingCenterProps {
 export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterProps> = ({
   isOpen,
   onClose,
+  onCancel,
   analysisResult,
   isLoading,
   progressPercent = 50,
@@ -252,6 +254,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
     if (session) {
       await BatchProcessingOrchestrator.cancelSession(session.sessionId);
     }
+    onCancel?.();
     onClose();
   };
 
@@ -284,7 +287,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
               <Sparkles size={18} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm font-black tracking-wide">مركز المراجعة والقرارات للاستيراد الذكي</h2>
                 {analysisResult && (
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200 text-[10px] font-bold border border-emerald-400/30 flex items-center gap-1">
@@ -295,6 +298,11 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
                 {analysisResult?.metadata.providerName && (
                   <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-100 text-[10px] font-bold border border-teal-400/30 flex items-center gap-1">
                     ⚡ {analysisResult.metadata.providerName}
+                  </span>
+                )}
+                {analysisResult?.metadata.isWorkerUsed && (
+                  <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-200 text-[10px] font-bold border border-cyan-400/30">
+                    ⚡ معالجة مجمعة فائقة
                   </span>
                 )}
                 {analysisResult?.metadata.isCached && (
@@ -342,6 +350,15 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
                 style={{ width: `${Math.min(100, Math.max(15, progressPercent))}%` }}
               />
             </div>
+
+            <button
+              id="btn-abort-smart-import"
+              type="button"
+              onClick={handleCancel}
+              className="mt-3 px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all active:scale-95"
+            >
+              إلغاء المعالجة
+            </button>
           </div>
         )}
 

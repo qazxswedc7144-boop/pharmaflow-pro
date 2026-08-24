@@ -488,7 +488,26 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
     }
   }, [onNavigate]);
 
+  const importAbortControllerRef = useRef<AbortController | null>(null);
+
+  const cancelSmartImport = useCallback(() => {
+    if (importAbortControllerRef.current) {
+      importAbortControllerRef.current.abort();
+      importAbortControllerRef.current = null;
+    }
+    setIsProcessingAI(false);
+    setShowAIConfirmModal(false);
+    addToast("تم إلغاء عملية الاستيراد الذكي", "info");
+  }, [addToast]);
+
   const handleAIImport = async (file: File | string) => {
+    // Abort any prior pending import
+    if (importAbortControllerRef.current) {
+      importAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    importAbortControllerRef.current = abortController;
+
     setIsProcessingAI(true);
     setImportProgressPercent(10);
     setImportProgressStage('DETECTING_SOURCE');
@@ -500,6 +519,7 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
       const analysis = await SmartImportOrchestrator.analyzeInvoice(file, {
         tenantId: (user as any)?.tenantId,
         branchId: (user as any)?.branchId,
+        abortSignal: abortController.signal,
         onProgress: (stage, percent, message) => {
           setImportProgressStage(stage);
           setImportProgressPercent(percent);
@@ -540,10 +560,19 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
 
       setIsProcessingAI(false);
     } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        console.log('[SMART IMPORT] Import was cancelled by user.');
+        setIsProcessingAI(false);
+        return;
+      }
       console.error("[SMART IMPORT ERROR]:", error);
       addToast(`❌ تعذر استيراد الفاتورة: ${error.message || 'خطأ غير متوقع'}`, "error");
       setIsProcessingAI(false);
       setShowAIConfirmModal(false);
+    } finally {
+      if (importAbortControllerRef.current === abortController) {
+        importAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -1078,6 +1107,7 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
     showAIConfirmModal,
     setShowAIConfirmModal,
     handleAIImport,
+    cancelSmartImport,
     applyAIParsedData,
     resetInvoiceState,
     savePhase,

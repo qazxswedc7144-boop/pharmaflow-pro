@@ -164,8 +164,16 @@ export class MultiStagePipeline {
 
     for (const r of rawRows) {
       const healingRes = SelfHealingEngine.healRow(r);
-      healedRows.push(healingRes.healedRow);
-      if (healingRes.healingResult.isModified) {
+      const isHealed = r.isHealed || healingRes.healingResult.isModified;
+      healedRows.push({
+        ...healingRes.healedRow,
+        isHealed,
+        healingExplanations: [
+          ...(r.healingExplanations || []),
+          ...healingRes.healingResult.explanations
+        ]
+      });
+      if (isHealed) {
         healedRowCount++;
         healedFieldCount += healingRes.healingResult.healedFields.length;
         healingDetails.push(...healingRes.healingResult.explanations);
@@ -184,7 +192,9 @@ export class MultiStagePipeline {
           expiryDate: hr.expiryDate,
           batchNumber: hr.batchNumber,
           barcode: hr.barcode,
-          discount: hr.discountPercent
+          discount: hr.discountPercent,
+          isHealed: hr.isHealed,
+          healingExplanations: hr.healingExplanations
         },
         rawCells: [
           hr.productName,
@@ -241,7 +251,11 @@ export class MultiStagePipeline {
       const c = row.cells || {};
       const q = typeof c.quantity === 'number' ? c.quantity : Number(c.quantity || 1);
       const p = typeof c.unitPrice === 'number' ? c.unitPrice : Number(c.unitPrice || 0);
-      const t = typeof c.total === 'number' ? c.total : (c.total ? Number(c.total) : undefined);
+      const t = typeof c.total === 'number' ? c.total : (c.total !== undefined && c.total !== null && String(c.total).trim() !== '' ? Number(c.total) : undefined);
+      const isHealed = c.isHealed === true;
+      const healingExplanations = Array.isArray(c.healingExplanations) 
+        ? (c.healingExplanations as string[]) 
+        : (Array.isArray(c.healingNotes) ? (c.healingNotes as string[]) : undefined);
 
       return {
         rowNumber: idx + 1,
@@ -255,7 +269,9 @@ export class MultiStagePipeline {
         barcode: c.barcode ? String(c.barcode).trim() : undefined,
         discountPercent: typeof c.discount === 'number' ? c.discount : (c.discount ? Number(c.discount) : 0),
         status: 'VALID',
-        validationIssues: []
+        validationIssues: [],
+        isHealed,
+        healingExplanations
       };
     });
   }

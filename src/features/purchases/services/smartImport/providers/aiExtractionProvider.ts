@@ -1,7 +1,7 @@
 // src/features/purchases/services/smartImport/providers/aiExtractionProvider.ts
 /**
  * PharmaFlow PRO ERP — Sovereign Enterprise Edition
- * Phase 2.5: Resilient AI Extraction Provider with Circuit Breaker & Timeout Guard
+ * Phase 2.6: Resilient AI Extraction Provider with Image Optimization & Circuit Breaker
  */
 
 import { 
@@ -19,6 +19,7 @@ import {
 } from '../types';
 import { CircuitBreaker } from './circuitBreaker';
 import { RateLimiter } from './rateLimiter';
+import { ImageOptimizer } from '../performance/imageOptimizer';
 
 export class AiExtractionProvider implements IDocumentExtractionProvider {
   public readonly name = 'GeminiAiExtractionEngine';
@@ -67,10 +68,26 @@ export class AiExtractionProvider implements IDocumentExtractionProvider {
       throw new Error('قاطع الدائرة (Circuit Breaker) مفتوح بسبب أخطاء متكررة في خادم الذكاء الاصطناعي. تم التحويل الاحتياطي.');
     }
 
-    onProgress?.(40, 'جاري التواصل مع نموذج الذكاء الاصطناعي لاستخراج وتحليل بيانات الفاتورة...');
+    onProgress?.(40, 'جاري تحسين الصورة والتواصل مع نموذج الذكاء الاصطناعي...');
 
     try {
-      // Execute with timeout and rate limiter
+      // 1. Image Optimization & Smart Downscaling if image
+      let processedFile: File | string = file;
+      try {
+        if (
+          (typeof file === 'string' && file.startsWith('data:image/')) ||
+          (file instanceof File && file.type.startsWith('image/'))
+        ) {
+          const opt = await ImageOptimizer.optimizeForOcr(file, { maxDimension: 2048, targetQuality: 0.90 });
+          if (opt.isDownscaled) {
+            processedFile = opt.dataUrl;
+          }
+        }
+      } catch (optErr) {
+        console.warn('[AiExtractionProvider] Image optimization skipped, using raw file:', optErr);
+      }
+
+      // 2. Execute with timeout and rate limiter
       const result = await this.rateLimiter.executeWithRetry(async () => {
         // Create an AbortController with 15 second timeout to prevent UI freeze
         const timeoutController = new AbortController();
@@ -88,7 +105,7 @@ export class AiExtractionProvider implements IDocumentExtractionProvider {
             throw new Error('تم إلغاء عملية الذكاء الاصطناعي بسبب انتهاء المهلة المحددة (Timeout).');
           }
 
-          const parsed = await processInvoice(file);
+          const parsed = await processInvoice(processedFile);
           clearTimeout(timeoutId);
           return parsed;
         } catch (callErr: any) {
@@ -158,7 +175,7 @@ export class AiExtractionProvider implements IDocumentExtractionProvider {
         metadata: {
           extractionMethod: 'AI_DOCUMENT',
           extractedAt: new Date().toISOString(),
-          parserVersion: '2.5.0',
+          parserVersion: '2.6.0',
           confidence: 0.90
         },
         documentFields: {

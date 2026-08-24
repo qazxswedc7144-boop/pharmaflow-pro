@@ -308,7 +308,12 @@ export class SpreadsheetParser {
       const cells: Record<string, unknown> = {};
       headers.forEach((_, idx) => {
         const fieldName = columnDefs[idx]?.mappedField || `Col_${idx + 1}`;
-        cells[fieldName] = row[idx] ?? '';
+        const rawVal = row[idx];
+        if (rawVal !== undefined && String(rawVal).trim() !== '') {
+          cells[fieldName] = rawVal;
+        } else {
+          cells[fieldName] = undefined;
+        }
       });
 
       rawRows.push({

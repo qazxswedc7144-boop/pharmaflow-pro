@@ -9,7 +9,7 @@ export type ImportSourceType =
   | 'TSV'
   | 'TXT'
   | 'DOCX'
-  | 'PDF'
+  | 'PDF' 
   | 'PDF_TEXT' 
   | 'PDF_SCANNED' 
   | 'IMAGE' 
@@ -188,7 +188,7 @@ export interface ExtractedImportRow {
   duplicateReason?: string;
   isSkipped?: boolean;
 
-  // Phase 2.5: Field-Level Confidence & Self-Healing
+  // Phase 2.5 & 2.6: Field-Level Confidence & Self-Healing
   fieldConfidence?: Record<string, { score: number; level: string; reasons: string[] }>;
   isHealed?: boolean;
   healingExplanations?: string[];
@@ -206,12 +206,13 @@ export interface ImportSummary {
   detectedInvoiceNumber?: string;
   detectedDate?: string;
 
-  // Phase 2.5 Summaries
+  // Phase 2.5 & 2.6 Summaries
   confidenceScore?: number;
   confidenceLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'BLOCKED';
   healedRowsCount?: number;
   providerName?: string;
   isFallbackActive?: boolean;
+  isWorkerUsed?: boolean;
 }
 
 export interface ImportAnalysisResult {
@@ -235,6 +236,17 @@ export interface ImportAnalysisResult {
     isFallbackUsed?: boolean;
     fallbackReason?: string;
     parserVersion?: string;
+    isWorkerUsed?: boolean;
+    performanceMetrics?: {
+      parseTimeMs: number;
+      matchingTimeMs: number;
+      confidenceTimeMs: number;
+      aiTimeMs: number;
+      totalTimeMs: number;
+      totalRows: number;
+      cacheHit: boolean;
+      workerUsed: boolean;
+    };
   };
   confidenceReport?: any;
   healingSummary?: {

@@ -1,8 +1,14 @@
 // src/features/purchases/services/smartImport/productMatchingEngine.ts
+/**
+ * PharmaFlow PRO ERP — Sovereign Enterprise Edition
+ * Phase 2.6: High-Performance Product Matching Engine with Indexed Lookup & Fuzzy Memoization
+ */
+
 import { db } from '@/core/db';
 import { Product } from '@/types';
 import { ExtractedImportRow } from './types';
 import { ColumnIntelligence } from './columnIntelligence';
+import { ProductMatchingIndex } from './performance/matchingIndex';
 
 export interface ProductMatchCandidate {
   product: Product;
@@ -12,7 +18,7 @@ export interface ProductMatchCandidate {
 
 export class ProductMatchingEngine {
   /**
-   * Computes string similarity between 0.0 and 1.0
+   * Computes string similarity between 0.0 and 1.0 (Dice Coefficient)
    */
   static calculateSimilarity(str1: string, str2: string): number {
     if (!str1 || !str2) return 0;
@@ -128,7 +134,7 @@ export class ProductMatchingEngine {
       }
     }
 
-    // Tier 6: Fuzzy Similarity Match (Threshold > 0.70)
+    // Tier 6: Fuzzy Similarity Match (Threshold >= 0.70)
     let bestFuzzy: Product | null = null;
     let bestScore = 0;
 
@@ -149,15 +155,17 @@ export class ProductMatchingEngine {
   }
 
   /**
-   * Processes an array of rows and enriches them with product matching information
+   * High-performance batch product matching with pre-indexed search and fuzzy memoization
    */
   static matchAllRows(
     rows: ExtractedImportRow[],
     products: Product[],
     learnedAliases: Record<string, string> = {}
   ): ExtractedImportRow[] {
+    const index = new ProductMatchingIndex(products);
+
     return rows.map(row => {
-      const candidate = this.matchItem(row, products, learnedAliases);
+      const candidate = index.matchRow(row, learnedAliases);
       if (candidate) {
         return {
           ...row,

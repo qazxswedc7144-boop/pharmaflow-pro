@@ -1,4 +1,9 @@
 // src/features/purchases/services/smartImport/smartImportOrchestrator.ts
+/**
+ * PharmaFlow PRO ERP — Sovereign Enterprise Edition
+ * Phase 2.6: Smart Import Performance & Large File Hardening Orchestrator
+ */
+
 import { SourceDetector } from './sourceDetector';
 import { SpreadsheetParser } from './spreadsheetParser';
 import { ColumnIntelligence } from './columnIntelligence';
@@ -7,7 +12,6 @@ import { ProductMatchingEngine } from './productMatchingEngine';
 import { ParserRegistry } from './parsers';
 import { MultiStagePipeline } from './providers/multiStagePipeline';
 import { ConfidenceEngine } from './confidence/confidenceEngine';
-import { SelfHealingEngine } from './selfHealing/selfHealingEngine';
 import { 
   ImportAnalysisResult, 
   ExtractedImportRow, 
@@ -20,6 +24,20 @@ import { authService } from '@features/auth/services/authService';
 import { auditLogService } from '@/services/audit/auditLog';
 import { Product, InvoiceItem } from '@/types';
 import { normalizeToISODate } from '@/utils/expiryUtils';
+import { ImportLimitEnforcer } from './performance/importLimits';
+import { SmartImportWorkerBridge } from './performance/workerBridge';
+import { ImportTelemetry } from './performance/importTelemetry';
+
+export interface SmartImportAnalysisOptions {
+  tenantId?: string;
+  branchId?: string;
+  products?: Product[];
+  onProgress?: SmartImportProgressCallback;
+  forceReprocess?: boolean;
+  abortSignal?: AbortSignal;
+  learnedAliases?: Record<string, string>;
+  chunkSize?: number;
+}
 
 export class SmartImportOrchestrator {
   /**
@@ -27,12 +45,7 @@ export class SmartImportOrchestrator {
    */
   static async analyzeFile(
     file: File | string,
-    options: {
-      tenantId?: string;
-      branchId?: string;
-      onProgress?: SmartImportProgressCallback;
-      forceReprocess?: boolean;
-    } = {}
+    options: SmartImportAnalysisOptions = {}
   ): Promise<ImportAnalysisResult> {
     return this.analyzeInvoice(file, options);
   }
@@ -42,23 +55,29 @@ export class SmartImportOrchestrator {
    */
   static async analyzeInvoice(
     file: File | string,
-    options: {
-      tenantId?: string;
-      branchId?: string;
-      onProgress?: SmartImportProgressCallback;
-      forceReprocess?: boolean;
-    } = {}
+    options: SmartImportAnalysisOptions = {}
   ): Promise<ImportAnalysisResult> {
     const startTime = Date.now();
-    const { onProgress, forceReprocess } = options;
+    let parseTimeMs = 0;
+    let matchingTimeMs = 0;
+    let confidenceTimeMs = 0;
+    let aiTimeMs = 0;
+
+    const { onProgress, forceReprocess, abortSignal, learnedAliases, chunkSize } = options;
+
+    if (abortSignal?.aborted) {
+      const err = new Error('تم إلغاء عملية الاستيراد بناءً على طلب المستخدم.');
+      err.name = 'AbortError';
+      throw err;
+    }
 
     const user = authService.getCurrentUser();
     const tenantId = options.tenantId || (user as any)?.tenantId || 'DEFAULT_TENANT';
     const branchId = options.branchId || (user as any)?.branchId || 'WH-MAIN';
     const userId = user?.User_Email || user?.id || 'SYSTEM_USER';
 
-    // 1. Source Detection & Validation
-    onProgress?.('DETECTING_SOURCE', 10, 'جاري فحص مصدر وصيغة المستند...');
+    // 1. Source Detection & Early Limits Enforcement
+    onProgress?.('DETECTING_SOURCE', 10, 'جاري فحص مصدر وصيغة المستند ومطابقة الحدود...');
     const validation = SourceDetector.validateFile(file);
     if (!validation.isValid) {
       throw new Error(validation.errorMessage || 'ملف غير مدعوم');
@@ -68,21 +87,27 @@ export class SmartImportOrchestrator {
       table: 'purchases',
       action: 'SMART_IMPORT_STARTED',
       entityId: `IMP-${Date.now()}`,
-      newData: { fileName: validation.fileName, sourceType: validation.sourceType },
+      newData: { fileName: validation.fileName, sourceType: validation.sourceType, size: validation.fileSize },
       details: `Smart Import started for source ${validation.sourceType} (${validation.fileName})`
     });
 
-    // 2. Multi-Stage Pipeline Execution
+    // 2. Multi-Stage Pipeline Execution (with Yielding & Signal)
+    const parseStart = Date.now();
     const pipelineResult = await MultiStagePipeline.execute(file, {
       tenantId,
       branchId,
       userId,
       forceReprocess,
+      signal: abortSignal,
       onProgress: (pct, msg) => {
         const stage = pct < 30 ? 'PARSING_DOCUMENT' : pct < 60 ? 'DETECTING_COLUMNS' : 'EXTRACTING_ROWS';
         onProgress?.(stage, pct, msg);
       }
     });
+    parseTimeMs = Date.now() - parseStart;
+    if (pipelineResult.activeProvider === 'AI') {
+      aiTimeMs = pipelineResult.executionTimeMs;
+    }
 
     const canonicalDoc = pipelineResult.canonicalDoc;
     const detectedSupplier = canonicalDoc.documentFields.supplierName;
@@ -119,63 +144,94 @@ export class SmartImportOrchestrator {
       throw new Error('لم يتم العثور على أي أصناف مقروءة في المستند.');
     }
 
-    // 3. Product Matching (Tenant & Branch Isolated)
-    onProgress?.('MATCHING_PRODUCTS', 75, 'جاري مطابقة الأصناف مع دليل الأدوية والمخزون...');
-    const dbProducts = await ProductMatchingEngine.loadScopedProducts(tenantId, branchId);
+    // Enterprise Row Limit Enforcement
+    const rowCheck = ImportLimitEnforcer.validateRowCount(validation.sourceType, rawExtractedRows.length);
+    if (!rowCheck.isAllowed) {
+      throw new Error(rowCheck.errorMessage || 'تجاوز عدد الأسطر الحد الأقصى المسموح به.');
+    }
+
+    // 3. Load Scoped Database Products (Tenant & Branch Isolated)
+    onProgress?.('MATCHING_PRODUCTS', 70, 'جاري تحميل دليل الأدوية والمخزون المعزول...');
+    const dbProducts = options.products && options.products.length > 0 
+      ? options.products 
+      : await ProductMatchingEngine.loadScopedProducts(tenantId, branchId);
     
     // 4. Data Validation & Math Verification
-    onProgress?.('VALIDATING_DATA', 90, 'جاري التحقق من الحسابات والكميات والتواريخ...');
+    onProgress?.('VALIDATING_DATA', 78, 'جاري التحقق الحسابي الأولي...');
     const seenItemsMap = new Map<string, number>();
     const validatedRows: ExtractedImportRow[] = rawExtractedRows.map((rawRow, idx) => {
       return DataValidator.validateRow(rawRow, idx + 1, seenItemsMap);
     });
 
-    // Enrich with product matching
-    const matchedRows = ProductMatchingEngine.matchAllRows(validatedRows, dbProducts);
-
-    // 5. Apply Field-Level Self-Healing and Explainable Multi-Field Confidence Scoring
-    let healedCount = 0;
-    const finalEnrichedRows: ExtractedImportRow[] = matchedRows.map(row => {
-      const healing = SelfHealingEngine.healRow(row);
-      const rowConf = ConfidenceEngine.scoreRow(healing.healedRow);
-
-      if (healing.healingResult.isModified) {
-        healedCount++;
-      }
-
-      return {
-        ...healing.healedRow,
-        isHealed: healing.healingResult.isModified,
-        healingExplanations: healing.healingResult.explanations,
-        fieldConfidence: {
-          productName: { score: rowConf.productNameConfidence.score, level: rowConf.productNameConfidence.level, reasons: rowConf.productNameConfidence.reasons },
-          quantity: { score: rowConf.quantityConfidence.score, level: rowConf.quantityConfidence.level, reasons: rowConf.quantityConfidence.reasons },
-          unitPrice: { score: rowConf.unitPriceConfidence.score, level: rowConf.unitPriceConfidence.level, reasons: rowConf.unitPriceConfidence.reasons },
-          total: { score: rowConf.totalConfidence.score, level: rowConf.totalConfidence.level, reasons: rowConf.totalConfidence.reasons },
-          expiryDate: { score: rowConf.expiryDateConfidence.score, level: rowConf.expiryDateConfidence.level, reasons: rowConf.expiryDateConfidence.reasons },
-          barcode: { score: rowConf.barcodeConfidence.score, level: rowConf.barcodeConfidence.level, reasons: rowConf.barcodeConfidence.reasons },
-          batchNumber: { score: rowConf.batchNumberConfidence.score, level: rowConf.batchNumberConfidence.level, reasons: rowConf.batchNumberConfidence.reasons }
+    // 5. Worker Bridge / Chunked Batch Processing for Matching, Healing & Confidence Scoring
+    onProgress?.('MATCHING_PRODUCTS', 85, 'جاري مطابقة الأصناف والاستشفاء الذاتي وحساب الثقة...');
+    const matchStart = Date.now();
+    const workerBridge = new SmartImportWorkerBridge();
+    
+    let workerResult;
+    try {
+      workerResult = await workerBridge.processBatch(
+        {
+          rows: validatedRows,
+          products: dbProducts,
+          learnedAliases: learnedAliases || {},
+          chunkSize: chunkSize || 150
+        },
+        {
+          abortSignal,
+          onProgress: (proc, total, pct) => {
+            const mappedPct = 85 + Math.round((pct / 100) * 12);
+            onProgress?.('MATCHING_PRODUCTS', mappedPct, `جاري معالجة الأصناف (${proc}/${total})...`);
+          }
         }
-      };
-    });
+      );
+    } finally {
+      workerBridge.terminate();
+    }
 
-    // Compute final summary
+    matchingTimeMs = Date.now() - matchStart;
+    const finalEnrichedRows: ExtractedImportRow[] = workerResult.enrichedRows;
+    const healedCount = workerResult.healedCount;
+
+    // 6. Compute Final Summaries & Overall Confidence
+    const confStart = Date.now();
     const summary = DataValidator.generateSummary(finalEnrichedRows);
     summary.detectedSupplier = detectedSupplier;
     summary.detectedInvoiceNumber = detectedInvoiceNumber;
     summary.detectedDate = detectedDate;
 
-    // Phase 2.5 summary metrics
     const docConfidence = ConfidenceEngine.scoreDocument(summary, finalEnrichedRows);
     summary.confidenceScore = docConfidence.overallScore;
     summary.confidenceLevel = docConfidence.overallLevel;
     summary.healedRowsCount = healedCount;
     summary.providerName = pipelineResult.activeProviderName;
     summary.isFallbackActive = pipelineResult.isFallbackUsed;
+    summary.isWorkerUsed = workerResult.workerUsed;
+    confidenceTimeMs = Date.now() - confStart;
 
-    onProgress?.('READY_FOR_REVIEW', 100, 'اكتمل التحليل الذكي بنجاح!');
+    onProgress?.('READY_FOR_REVIEW', 100, 'اكتمل التحليل الذكي بنجاح ومركز القرارات جاهز!');
 
-    const processingTimeMs = Date.now() - startTime;
+    const totalProcessingTimeMs = Date.now() - startTime;
+
+    // 7. Sanitize & Record Telemetry Benchmark
+    const performanceMetrics = {
+      sourceType: validation.sourceType,
+      fileName: validation.fileName,
+      fileSize: validation.fileSize,
+      totalRows: finalEnrichedRows.length,
+      parseTimeMs,
+      matchingTimeMs,
+      confidenceTimeMs,
+      aiTimeMs,
+      totalTimeMs: totalProcessingTimeMs,
+      cacheHit: Boolean(pipelineResult.isCached),
+      workerUsed: Boolean(workerResult.workerUsed),
+      healedRowsCount: healedCount,
+      tenantId,
+      branchId
+    };
+
+    await ImportTelemetry.recordImportBenchmark(performanceMetrics);
 
     await auditLogService.log({
       table: 'purchases',
@@ -190,9 +246,10 @@ export class SmartImportOrchestrator {
         confidence: docConfidence.overallScore,
         healedRows: healedCount,
         isCached: pipelineResult.isCached,
-        processingTimeMs
+        isWorkerUsed: workerResult.workerUsed,
+        processingTimeMs: totalProcessingTimeMs
       },
-      details: `Smart Import analyzed: ${finalEnrichedRows.length} rows (${processingTimeMs}ms) via ${pipelineResult.activeProviderName}`
+      details: `Smart Import analyzed: ${finalEnrichedRows.length} rows (${totalProcessingTimeMs}ms, Worker: ${workerResult.workerUsed}) via ${pipelineResult.activeProviderName}`
     });
 
     return {
@@ -211,13 +268,24 @@ export class SmartImportOrchestrator {
         branchId,
         userId,
         analyzedAt: new Date().toISOString(),
-        processingTimeMs,
+        processingTimeMs: totalProcessingTimeMs,
         providerType: pipelineResult.activeProvider,
         providerName: pipelineResult.activeProviderName,
         isCached: pipelineResult.isCached,
         isFallbackUsed: pipelineResult.isFallbackUsed,
         fallbackReason: pipelineResult.fallbackReason,
-        parserVersion: '2.5.0'
+        parserVersion: '2.6.0',
+        isWorkerUsed: workerResult.workerUsed,
+        performanceMetrics: {
+          parseTimeMs,
+          matchingTimeMs,
+          confidenceTimeMs,
+          aiTimeMs,
+          totalTimeMs: totalProcessingTimeMs,
+          totalRows: finalEnrichedRows.length,
+          cacheHit: Boolean(pipelineResult.isCached),
+          workerUsed: Boolean(workerResult.workerUsed)
+        }
       }
     };
   }
@@ -231,6 +299,7 @@ export class SmartImportOrchestrator {
       tenantId?: string;
       branchId?: string;
       onProgress?: (percent: number, message: string) => void;
+      signal?: AbortSignal;
     } = {}
   ): Promise<CanonicalImportDocument> {
     const user = authService.getCurrentUser();
@@ -248,7 +317,8 @@ export class SmartImportOrchestrator {
       tenantId,
       branchId,
       userId,
-      onProgress: options.onProgress
+      onProgress: options.onProgress,
+      signal: options.signal
     });
   }
 
