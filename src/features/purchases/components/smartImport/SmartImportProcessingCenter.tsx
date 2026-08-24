@@ -28,9 +28,7 @@ import {
   FileText, 
   Image as ImageIcon, 
   Camera, 
-  Edit3,
-  ShieldAlert,
-  ShieldCheck
+  Edit3
 } from 'lucide-react';
 import { Modal } from '@/components/shared/SharedUI';
 import { useUIStore } from '@/store/useUIStore';

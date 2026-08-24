@@ -113,7 +113,10 @@ export class SelfHealingEngine {
     const easternDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
     let clean = input.trim();
     for (let i = 0; i < 10; i++) {
-      clean = clean.replace(new RegExp(easternDigits[i], 'g'), i.toString());
+      const digit = easternDigits[i];
+      if (digit) {
+        clean = clean.replace(new RegExp(digit, 'g'), i.toString());
+      }
     }
     clean = clean.replace(/٫/g, '.').replace(/,/g, '.').replace(/[^\d.-]/g, '');
     const num = parseFloat(clean);
@@ -127,7 +130,7 @@ export class SelfHealingEngine {
     if (!rawDate) return '';
     const trimmed = rawDate.trim();
     const dmy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (dmy) {
+    if (dmy && dmy[1] && dmy[2] && dmy[3]) {
       const day = dmy[1].padStart(2, '0');
       const month = dmy[2].padStart(2, '0');
       const year = dmy[3];
@@ -199,7 +202,7 @@ export class SelfHealingEngine {
 
     // Format 1: MM/YY (e.g. 05/27 -> 2027-05-31)
     const mmYyMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{2})$/);
-    if (mmYyMatch) {
+    if (mmYyMatch && mmYyMatch[1] && mmYyMatch[2]) {
       const month = parseInt(mmYyMatch[1], 10);
       const shortYear = parseInt(mmYyMatch[2], 10);
       if (month >= 1 && month <= 12) {
@@ -219,7 +222,7 @@ export class SelfHealingEngine {
 
     // Format 2: MM/YYYY or YYYY/MM (e.g. 05/2027 or 2027/05)
     const mmYyyyMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{4})$/);
-    if (mmYyyyMatch) {
+    if (mmYyyyMatch && mmYyyyMatch[1] && mmYyyyMatch[2]) {
       const month = parseInt(mmYyyyMatch[1], 10);
       const year = parseInt(mmYyyyMatch[2], 10);
       if (month >= 1 && month <= 12 && year >= 2000 && year <= 2099) {
@@ -237,7 +240,7 @@ export class SelfHealingEngine {
     }
 
     const yyyyMmMatch = trimmed.match(/^(\d{4})[\/\-](\d{1,2})$/);
-    if (yyyyMmMatch) {
+    if (yyyyMmMatch && yyyyMmMatch[1] && yyyyMmMatch[2]) {
       const year = parseInt(yyyyMmMatch[1], 10);
       const month = parseInt(yyyyMmMatch[2], 10);
       if (month >= 1 && month <= 12 && year >= 2000 && year <= 2099) {
@@ -256,7 +259,7 @@ export class SelfHealingEngine {
 
     // Format 3: DD/MM/YYYY or DD-MM-YYYY
     const ddMmYyyyMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (ddMmYyyyMatch) {
+    if (ddMmYyyyMatch && ddMmYyyyMatch[1] && ddMmYyyyMatch[2] && ddMmYyyyMatch[3]) {
       const day = parseInt(ddMmYyyyMatch[1], 10);
       const month = parseInt(ddMmYyyyMatch[2], 10);
       const year = parseInt(ddMmYyyyMatch[3], 10);
@@ -281,7 +284,7 @@ export class SelfHealingEngine {
     for (const [monthName, monthNum] of Object.entries(this.MONTH_MAP)) {
       if (lower.includes(monthName)) {
         const yearMatch = lower.match(/\b(20\d{2})\b/);
-        if (yearMatch) {
+        if (yearMatch && yearMatch[1]) {
           const year = parseInt(yearMatch[1], 10);
           const normalized = getLastDayOfMonth(year, monthNum);
           return {
@@ -290,7 +293,7 @@ export class SelfHealingEngine {
             healedValue: normalized,
             isHealed: true,
             healingMethod: 'DATE_NORMALIZATION',
-            explanation: `تم استخراج التاريخ من النص (${trimmed}) إلى (${normalized})`,
+            explanation: `تم تحويل الشهر النصي (${monthName}) إلى (${normalized})`,
             confidenceDelta: 0.30
           };
         }
@@ -377,11 +380,13 @@ export class SelfHealingEngine {
     if (ean.length !== 13) return false;
     let sum = 0;
     for (let i = 0; i < 12; i++) {
-      const digit = parseInt(ean[i], 10);
+      const digitChar = ean[i];
+      const digit = digitChar ? parseInt(digitChar, 10) : 0;
       sum += (i % 2 === 0) ? digit : digit * 3;
     }
     const checkDigit = (10 - (sum % 10)) % 10;
-    return checkDigit === parseInt(ean[12], 10);
+    const lastChar = ean[12];
+    return checkDigit === (lastChar ? parseInt(lastChar, 10) : -1);
   }
 
   /**

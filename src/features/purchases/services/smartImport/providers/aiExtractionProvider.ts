@@ -45,7 +45,7 @@ export class AiExtractionProvider implements IDocumentExtractionProvider {
     }
   }
 
-  public canExtract(file: File | string, sourceType: ImportSourceType): boolean {
+  public canExtract(_file: File | string, sourceType: ImportSourceType): boolean {
     return (
       sourceType === 'IMAGE' ||
       sourceType === 'CAMERA' ||

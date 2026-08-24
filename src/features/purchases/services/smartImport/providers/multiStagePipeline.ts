@@ -21,7 +21,6 @@ import { ExtractionCacheService } from '../cache/extractionCacheService';
 import { SelfHealingEngine } from '../selfHealing/selfHealingEngine';
 import { ConfidenceEngine } from '../confidence/confidenceEngine';
 import { DocumentConfidenceReport } from '../confidence/confidence.types';
-import { DosageSafetyReport } from '../domain/resolution.types';
 
 export interface MultiStageExtractionOptions extends ImportParseContext {
   forceReprocess?: boolean;
@@ -102,7 +101,7 @@ export class MultiStagePipeline {
         onProgress?.(25, 'جاري القراءة المباشرة والتحليل الحتمي للجداول بدون ذكاء اصطناعي...');
         const res = await localParser.extract(file, options);
         // If local parser extracted items with good confidence, use it immediately
-        if (res.canonicalDoc.tables.length > 0 && res.canonicalDoc.tables[0].rows.length > 0) {
+        if (res.canonicalDoc.tables.length > 0 && (res.canonicalDoc.tables[0]?.rows?.length ?? 0) > 0) {
           extractionResult = res;
         }
       } catch (err: any) {
@@ -118,7 +117,7 @@ export class MultiStagePipeline {
         try {
           onProgress?.(40, 'جاري تشغيل محرك OCR للتعرف على محتويات الفاتورة...');
           const res = await localOcr.extract(file, options);
-          if (res.canonicalDoc.tables.length > 0 && res.canonicalDoc.tables[0].rows.length > 0) {
+          if (res.canonicalDoc.tables.length > 0 && (res.canonicalDoc.tables[0]?.rows?.length ?? 0) > 0) {
             extractionResult = res;
           }
         } catch (err: any) {
@@ -135,7 +134,7 @@ export class MultiStagePipeline {
         try {
           onProgress?.(55, 'جاري استخدام نموذج الذكاء الاصطناعي لاستخراج وتحليل بيانات الفاتورة...');
           const res = await aiProvider.extract(file, options);
-          if (res.canonicalDoc.tables.length > 0 && res.canonicalDoc.tables[0].rows.length > 0) {
+          if (res.canonicalDoc.tables.length > 0 && (res.canonicalDoc.tables[0]?.rows?.length ?? 0) > 0) {
             extractionResult = res;
           }
         } catch (err: any) {
@@ -174,7 +173,7 @@ export class MultiStagePipeline {
     }
 
     // Update table rows in canonical document with healed data
-    if (extractionResult.canonicalDoc.tables.length > 0) {
+    if (extractionResult.canonicalDoc.tables.length > 0 && extractionResult.canonicalDoc.tables[0]) {
       extractionResult.canonicalDoc.tables[0].rows = healedRows.map(hr => ({
         sourceRowIndex: hr.rowNumber,
         cells: {

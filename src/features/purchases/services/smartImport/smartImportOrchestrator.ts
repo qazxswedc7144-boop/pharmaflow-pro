@@ -4,7 +4,7 @@ import { SpreadsheetParser } from './spreadsheetParser';
 import { ColumnIntelligence } from './columnIntelligence';
 import { DataValidator } from './dataValidator';
 import { ProductMatchingEngine } from './productMatchingEngine';
-import { ParserRegistry, DocxParserAdapter } from './parsers';
+import { ParserRegistry } from './parsers';
 import { MultiStagePipeline } from './providers/multiStagePipeline';
 import { ConfidenceEngine } from './confidence/confidenceEngine';
 import { SelfHealingEngine } from './selfHealing/selfHealingEngine';
@@ -88,7 +88,7 @@ export class SmartImportOrchestrator {
     const detectedSupplier = canonicalDoc.documentFields.supplierName;
     const detectedInvoiceNumber = canonicalDoc.documentFields.invoiceNumber;
     const detectedDate = canonicalDoc.documentFields.invoiceDate;
-    const rawText = canonicalDoc.documentFields.notes || pipelineResult.confidenceReport?.summary;
+    const rawText = canonicalDoc.documentFields.notes || '';
 
     let detectedColumns: ColumnDefinition[] = [];
     let headerRowIndex = 0;

@@ -19,12 +19,8 @@ import {
   PlusCircle, 
   Ban, 
   Search, 
-  Clock, 
   ShieldAlert,
-  Sparkles,
   Pill,
-  Calendar,
-  Layers,
   Edit3,
   Check,
   Calculator
@@ -334,10 +330,15 @@ export const SmartImportProductResolution: React.FC<SmartImportProductResolution
                     >
                       إنشاء كصنف دوائي منفصل (آمن وموصى به)
                     </button>
-                    {row.suggestedProducts[0] && (
+                    {row.suggestedProducts && row.suggestedProducts.length > 0 && row.suggestedProducts[0] && (
                       <button
                         type="button"
-                        onClick={() => handleSelectCandidate(row.sourceRowId, row.suggestedProducts[0])}
+                        onClick={() => {
+                          const candidate = row.suggestedProducts[0];
+                          if (candidate) {
+                            handleSelectCandidate(row.sourceRowId, candidate);
+                          }
+                        }}
                         className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-black shadow-2xs"
                       >
                         تأكيد الربط بالصنف المقترح رغم الاختلاف

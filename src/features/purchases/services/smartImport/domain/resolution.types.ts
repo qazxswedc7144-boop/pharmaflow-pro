@@ -4,7 +4,7 @@
  * Phase 2.4: Unified Resolution Domain Model & Contracts
  */
 
-import { ImportSourceType, ImportDiagnostic } from '../types';
+import { ImportDiagnostic } from '../types';
 import { NormalizedPharmaceuticalInfo } from '../aliasLearning/aliasLearning.types';
 
 export type ResolutionStatus =
@@ -70,6 +70,7 @@ export interface ResolutionCandidate {
 
 export interface DosageSafetyReport {
   isConflict: boolean;
+  conflictType?: ConflictType | string;
   severity: 'CRITICAL' | 'WARNING' | 'INFO';
   reason?: string;
   sourceStrength?: string;

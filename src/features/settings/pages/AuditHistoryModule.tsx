@@ -34,6 +34,10 @@ const AuditHistoryModule: React.FC<AuditHistoryModuleProps> = ({
   const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
     if (initialFilter) {
       setFilterType(initialFilter);
     }
@@ -94,8 +98,8 @@ const AuditHistoryModule: React.FC<AuditHistoryModuleProps> = ({
         title="سجل الرقابة النهائية"
         subtitle={recordId ? `تاريخ تدقيق المستند: #${recordId}` : 'سجل تدقيق غير قابل للتلاعب'}
         icon={ShieldCheck}
-        onBack={onNavigate ? () => onNavigate('settings') : undefined}
-        backTitle="العودة للإعدادات"
+        onBack={onNavigate ? () => onNavigate('dashboard') : undefined}
+        backTitle="العودة للرئيسية"
         badge={
           <div className="inline-flex items-center gap-1.5 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-emerald-200">
             <Lock size={11} className="text-emerald-400" />

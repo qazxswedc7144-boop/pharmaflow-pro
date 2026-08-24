@@ -8,7 +8,6 @@ import React from 'react';
 import { 
   CheckSquare, 
   Square, 
-  Sparkles, 
   PlusCircle, 
   Trash2,
   ShieldCheck

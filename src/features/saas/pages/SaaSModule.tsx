@@ -675,13 +675,13 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
                   <div className="space-y-1.5">
                     <a
                       id="btn-whatsapp-support"
-                      href="https://wa.me/966500000000"
+                      href="https://wa.me/967772093714"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-between p-2.5 bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-black transition"
                     >
                       <span>💬 تواصل واتساب فني فوري (SLA)</span>
-                      <span className="font-mono text-[10px]">+966 50 000 0000</span>
+                      <span className="font-mono text-[10px]" dir="ltr">772093714 (967+)</span>
                     </a>
                     
                     <a

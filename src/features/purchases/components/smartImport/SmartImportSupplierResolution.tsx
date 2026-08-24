@@ -18,11 +18,7 @@ import {
   UserPlus, 
   Search, 
   Sparkles,
-  Ban,
-  Phone,
-  Receipt,
-  MapPin,
-  RefreshCw
+  Ban
 } from 'lucide-react';
 
 interface SmartImportSupplierResolutionProps {

@@ -69,7 +69,8 @@ export class ConfidenceEngine {
     overallScore: number;
     reasons: string[];
   } {
-    const pName = this.scoreProductName(row.productName, row.confidenceScore, row.dosageSafety);
+    const rawConfScore = (row as any).confidenceScore ?? ((row as any).confidence?.overallConfidence ?? 0.85);
+    const pName = this.scoreProductName(row.productName, rawConfScore, row.dosageSafety);
     const qty = this.scoreQuantity(row.quantity);
     const price = this.scoreUnitPrice(row.unitPrice);
     const total = this.scoreTotal(row.total, row.quantity, row.unitPrice, row.discountPercent);
@@ -301,8 +302,6 @@ export class ConfidenceEngine {
     unitPrice: number | undefined,
     discountPercent = 0
   ): FieldConfidence {
-    const reasons: string[] = [];
-
     if (total === undefined || isNaN(total) || total < 0) {
       // If quantity & price are solid, we can reconstruct
       if (quantity && quantity > 0 && unitPrice !== undefined && unitPrice >= 0) {
@@ -462,8 +461,6 @@ export class ConfidenceEngine {
    * Scores Barcode confidence
    */
   public static scoreBarcode(barcode: string | undefined): FieldConfidence {
-    const reasons: string[] = [];
-
     if (!barcode || !barcode.trim()) {
       return {
         field: 'barcode',
@@ -513,8 +510,6 @@ export class ConfidenceEngine {
    * Scores Batch Number confidence
    */
   public static scoreBatchNumber(batchNumber: string | undefined): FieldConfidence {
-    const reasons: string[] = [];
-
     if (!batchNumber || !batchNumber.trim()) {
       return {
         field: 'batchNumber',

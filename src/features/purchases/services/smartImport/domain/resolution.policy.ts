@@ -44,7 +44,7 @@ export class ResolutionPolicy {
     return {
       isConflict: !safety.isSafe,
       conflictType,
-      severity: safety.severity,
+      severity: safety.severity || 'INFO',
       reason: safety.reason,
       sourceStrength: safety.importedInfo?.dosage ? `${safety.importedInfo.dosage.value}${safety.importedInfo.dosage.unit}` : undefined,
       sourceForm: safety.importedInfo?.form,

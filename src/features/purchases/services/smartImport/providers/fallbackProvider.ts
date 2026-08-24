@@ -12,7 +12,6 @@ import {
 } from './provider.types';
 import { 
   ImportParseContext, 
-  ImportSourceType, 
   CanonicalImportDocument, 
   CanonicalImportTable, 
   CanonicalImportRawRow 

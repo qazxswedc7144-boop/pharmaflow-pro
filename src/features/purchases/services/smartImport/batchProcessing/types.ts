@@ -12,10 +12,7 @@ import {
   ConflictSource, 
   ConflictType, 
   ResolutionItem, 
-  ResolutionCandidate,
-  DosageSafetyReport,
-  ResolutionSummaryMetrics,
-  ResolutionValidationReport
+  DosageSafetyReport
 } from '../domain/resolution.types';
 import { NormalizedPharmaceuticalInfo } from '../aliasLearning/aliasLearning.types';
 

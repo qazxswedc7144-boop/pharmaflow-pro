@@ -12,11 +12,9 @@ import {
   Plus, 
   Ban, 
   Layers, 
-  Search,
-  ShieldAlert,
-  Sparkles,
-  UserCheck,
-  Building2
+  Search, 
+  ShieldAlert, 
+  Sparkles 
 } from 'lucide-react';
 
 export type ProductFilterTab = 
@@ -44,16 +42,12 @@ export interface SmartImportBatchSummaryProps {
 
 export const SmartImportBatchSummary: React.FC<SmartImportBatchSummaryProps> = ({
   summary,
-  supplierStatus,
   activeTab,
   onTabChange,
   searchTerm,
   onSearchChange,
   confidenceScore,
   confidenceLevel,
-  providerName,
-  isCached,
-  isFallbackActive,
   healedRowsCount = 0
 }) => {
   const criticalCount = summary.criticalConflictsCount || 0;

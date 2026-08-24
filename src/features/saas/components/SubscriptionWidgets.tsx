@@ -2,91 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  ShieldAlert, Sparkles, CheckCircle, XCircle, ArrowUpRight, 
+  ShieldAlert, CheckCircle, XCircle, ArrowUpRight,
   Settings, CreditCard, X
 } from 'lucide-react';
 import { SubscriptionService, SubscriptionStatus } from '@/services/saas/subscriptionService';
-import { SubscriptionContactFooter } from './SubscriptionContactFooter';
+import { SubscriptionContactFooter, UNIFIED_SUPPORT_NUMBER } from './SubscriptionContactFooter';
+import { SubscriptionWelcomeModal, SubscriptionOnboardingModal } from './SubscriptionWelcomeModal';
 
-export { SubscriptionContactFooter };
-
-/**
- * Onboarding Modal Screen
- */
-export function SubscriptionOnboardingModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
-  if (!isOpen) return null;
-
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[1000] flex items-center justify-center p-4" dir="rtl">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          transition={{ type: "spring", duration: 0.5 }}
-          className="bg-white dark:bg-gray-900 rounded-[32px] border border-slate-100 dark:border-gray-800 shadow-2xl max-w-lg w-full overflow-hidden text-right p-8 relative"
-        >
-          {/* Decorative Sparkle Background */}
-          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-
-          {/* Close button */}
-          <button 
-            onClick={onClose} 
-            className="absolute top-6 left-6 w-10 h-10 flex items-center justify-center bg-slate-50 dark:bg-gray-800 hover:bg-slate-150 dark:hover:bg-gray-700 text-slate-400 rounded-full transition-all"
-          >
-            <X size={18} />
-          </button>
-
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-14 h-14 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center text-emerald-500">
-              <Sparkles className="animate-pulse" size={28} />
-            </div>
-            <div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">مرحباً بك في PharmaFlow Pro</h2>
-              <p className="text-xs font-bold text-slate-400 mt-1">نسخة تجريبية مجانية تامة الصلاحية</p>
-            </div>
-          </div>
-
-          <div className="space-y-4 mb-8">
-            <p className="text-slate-600 dark:text-gray-300 text-sm leading-relaxed">
-              تم إعداد بيئة العمل السحابية الموحدة الخاصة بصيدليتك بنجاح. تمنحك هذه النسخة فرصة استكشاف كافة إمكانيات PharmaFlow Pro ERP دون قيود:
-            </p>
-
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <div className="bg-slate-50 dark:bg-gray-800/50 p-4 rounded-2xl border border-slate-100 dark:border-gray-850">
-                <span className="text-[10px] font-bold text-slate-400 block mb-1">العمليات المجانية</span>
-                <span className="text-lg font-black text-slate-800 dark:text-white">200 عملية</span>
-              </div>
-              <div className="bg-slate-50 dark:bg-gray-800/50 p-4 rounded-2xl border border-slate-100 dark:border-gray-850">
-                <span className="text-[10px] font-bold text-slate-400 block mb-1">الفروع النشطة</span>
-                <span className="text-lg font-black text-slate-800 dark:text-white">فرع رئيسي 1</span>
-              </div>
-              <div className="bg-slate-50 dark:bg-gray-800/50 p-4 rounded-2xl border border-slate-100 dark:border-gray-850">
-                <span className="text-[10px] font-bold text-slate-400 block mb-1">المستخدمين المتاحين</span>
-                <span className="text-lg font-black text-slate-800 dark:text-white">مدير نظام 1</span>
-              </div>
-              <div className="bg-slate-50 dark:bg-gray-800/50 p-4 rounded-2xl border border-slate-100 dark:border-gray-850">
-                <span className="text-[10px] font-bold text-slate-400 block mb-1">فئة الدعم الفني</span>
-                <span className="text-lg font-black text-slate-800 dark:text-white">أساسي عام</span>
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="w-full bg-[#1E4D4D] text-white py-4 rounded-2xl font-black text-sm hover:skew-x-1 transition-all shadow-xl shadow-slate-200 dark:shadow-none flex items-center justify-center gap-2 cursor-pointer animate-pulse"
-          >
-            <span>ابدأ التجربة المجانية الآن</span>
-            <ArrowUpRight size={16} />
-          </button>
-
-          <SubscriptionContactFooter supportNumber="+96777xxxxxxx" systemVersion="1.0.0" />
-        </motion.div>
-      </div>
-    </AnimatePresence>
-  );
-}
+export { SubscriptionContactFooter, SubscriptionWelcomeModal, SubscriptionOnboardingModal };
 
 /**
  * Top Global Usage Ribbon Component
@@ -349,7 +272,7 @@ export function SubscriptionBlockadeBackdrop({ onUpgrade }: { onUpgrade: () => v
             <span className="text-[9px] text-slate-400 font-bold block">يرجى الضغط على الزر أعلاه لترقية الاشتراك واستئناف كافة الصلاحيات بدون توقف.</span>
           </div>
           
-          <SubscriptionContactFooter supportNumber="+96777xxxxxxx" systemVersion="1.0.0" />
+          <SubscriptionContactFooter supportNumber={UNIFIED_SUPPORT_NUMBER} systemVersion="2.5.0" />
         </div>
       </motion.div>
     </div>

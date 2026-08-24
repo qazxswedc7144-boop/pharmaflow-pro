@@ -110,13 +110,11 @@ async function startServer() {
     }, 100);
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
-  const PORT = isDev ? 3000 : (process.env.PORT ? parseInt(process.env.PORT, 10) : 8080);
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   
-  // Clean up any stale processes that might be holding onto the port or 24678 in development
-  if (isDev) {
+  // Clean up any stale processes in development if needed
+  if (process.env.NODE_ENV !== "production") {
     killStaleProcesses(PORT);
-    killStaleProcesses(24678);
   }
 
   const app = express();
@@ -437,20 +435,6 @@ async function startServer() {
       console.error("[REPLICATION] Failed to run subscriber:", subErr);
     });
   });
-
-  // If running on a custom Cloud Run port (e.g. 8080), also attach a secondary listener on 3000 for internal compatibility if free
-  if (PORT !== 3000) {
-    try {
-      const secondaryServer = app.listen(3000, "0.0.0.0", () => {
-        console.log("[BOOT] Secondary listener open on http://0.0.0.0:3000");
-      });
-      secondaryServer.on("error", (err: any) => {
-        console.log("[BOOT] Secondary listener note (port 3000):", err?.message || err);
-      });
-    } catch (err: any) {
-      console.log("[BOOT] Secondary listener init note:", err?.message || err);
-    }
-  }
 
   // Graceful shutdown handling for active listener
   const gracefulShutdown = (signal: string) => {
