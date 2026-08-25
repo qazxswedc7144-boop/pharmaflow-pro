@@ -12,3 +12,4 @@ export * from './smartImportOrchestrator';
 export * from './parsers';
 export * from './batchProcessing';
 export * from './aliasLearning';
+export * from './cache/extractionCacheService';
