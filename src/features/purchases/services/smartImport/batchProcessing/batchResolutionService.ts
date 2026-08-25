@@ -264,8 +264,10 @@ export class BatchResolutionService {
           createdAliases.forEach(a => {
             updatedAliases[a.sourceName] = a.targetName;
           });
-          if (db.setSetting) {
-            await db.setSetting('smart_import_aliases', updatedAliases);
+          if (typeof db.saveSetting === 'function') {
+            await db.saveSetting('smart_import_aliases', updatedAliases);
+          } else if (typeof (db as any).setSetting === 'function') {
+            await (db as any).setSetting('smart_import_aliases', updatedAliases);
           }
         } catch (err) {
           console.warn('[BatchResolutionService] Could not save smart_import_aliases setting:', err);
