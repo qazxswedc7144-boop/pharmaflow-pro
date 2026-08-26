@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Box, TrendingUp, ArrowDownLeft, ArrowUpRight, 
-  Layers, ArrowRightLeft, Building2, User
+  Layers, ArrowRightLeft, Building2, User,
+  CheckCircle2, AlertTriangle, AlertCircle, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductTraceabilityService, ProductTraceabilitySummary } from '../services/ProductTraceabilityService';
@@ -199,11 +200,36 @@ export const ProductDrillDownModal: React.FC<ProductDrillDownModalProps> = ({
                   </div>
 
                   {/* Stock Equation Verification Card */}
-                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                    <h4 className="text-xs font-black text-slate-600 mb-3 flex items-center gap-2">
-                      <Layers size={16} className="text-[#1E4D4D]" />
-                      معادلة تطابق الرصيد المحاسبي المعتمد (Source of Truth Reconciliation)
-                    </h4>
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-xs font-black text-slate-600 flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-[#1E4D4D]" />
+                        معادلة تطابق الرصيد المحاسبي المعتمد (Source of Truth Reconciliation)
+                      </h4>
+                      {data.reconciliation && (
+                        <div className="flex items-center gap-2">
+                          {data.reconciliation.status === 'MATCHED' && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 size={13} className="text-emerald-600" />
+                              رصيد مطابق (MATCHED)
+                            </span>
+                          )}
+                          {data.reconciliation.status === 'WARNING' && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black bg-amber-50 text-amber-700 border border-amber-200">
+                              <AlertTriangle size={13} className="text-amber-600" />
+                              تنبيه تدقيق (WARNING)
+                            </span>
+                          )}
+                          {data.reconciliation.status === 'DISCREPANCY' && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                              <AlertCircle size={13} className="text-rose-600" />
+                              فارق مكتشف (DISCREPANCY)
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs font-bold">
                       <div className="text-center">
                         <span className="text-slate-400 block text-[10px]">صافي المشتريات</span>
@@ -214,18 +240,47 @@ export const ProductDrillDownModal: React.FC<ProductDrillDownModalProps> = ({
                         <span className="text-slate-400 block text-[10px]">صافي المبيعات</span>
                         <span className="text-blue-700 font-black">-{data.totalSoldQty - data.totalReturnedSaleQty}</span>
                       </div>
-                      <span className="text-slate-300 font-black text-base">=</span>
-                      <div className="text-center bg-white px-4 py-1.5 rounded-lg border border-slate-200">
-                        <span className="text-slate-400 block text-[10px]">الرصيد المحسوب</span>
-                        <span className="text-[#1E4D4D] font-black">
-                          {(data.totalPurchasedQty - data.totalReturnedPurchaseQty) - (data.totalSoldQty - data.totalReturnedSaleQty)}
+                      <span className="text-slate-300 font-black text-base">+</span>
+                      <div className="text-center">
+                        <span className="text-slate-400 block text-[10px]">التسويات</span>
+                        <span className={`font-black ${data.reconciliation?.adjustmentsQty >= 0 ? 'text-teal-700' : 'text-amber-700'}`}>
+                          {data.reconciliation ? (data.reconciliation.adjustmentsQty >= 0 ? `+${data.reconciliation.adjustmentsQty}` : data.reconciliation.adjustmentsQty) : 0}
                         </span>
                       </div>
-                      <div className="text-center bg-emerald-50 px-4 py-1.5 rounded-lg border border-emerald-200">
-                        <span className="text-emerald-700 block text-[10px]">الرصيد الفعلي الحالي</span>
+                      <span className="text-slate-300 font-black text-base">=</span>
+                      <div className="text-center bg-white px-4 py-1.5 rounded-lg border border-slate-200 shadow-2xs">
+                        <span className="text-slate-400 block text-[10px]">الرصيد الدفتري</span>
+                        <span className="text-[#1E4D4D] font-black">
+                          {data.reconciliation?.bookBalance ?? ((data.totalPurchasedQty - data.totalReturnedPurchaseQty) - (data.totalSoldQty - data.totalReturnedSaleQty))}
+                        </span>
+                      </div>
+                      <div className="text-center bg-blue-50/70 px-4 py-1.5 rounded-lg border border-blue-200 shadow-2xs">
+                        <span className="text-blue-700 block text-[10px]">مجموع الطبقات</span>
+                        <span className="text-blue-900 font-black">{data.reconciliation?.layersSum ?? 0}</span>
+                      </div>
+                      <div className="text-center bg-emerald-50 px-4 py-1.5 rounded-lg border border-emerald-200 shadow-2xs">
+                        <span className="text-emerald-700 block text-[10px]">رصيد بطاقة الصنف</span>
                         <span className="text-emerald-800 font-black">{data.remainingStock}</span>
                       </div>
                     </div>
+
+                    {/* Discrepancies Diagnostic List (if any) */}
+                    {data.reconciliation && data.reconciliation.discrepancies.length > 0 && (
+                      <div className="mt-3 p-3.5 bg-rose-50/60 border border-rose-200/80 rounded-xl space-y-2">
+                        <div className="flex items-center gap-2 text-rose-800 text-xs font-black">
+                          <AlertCircle size={14} className="text-rose-600" />
+                          <span>سجل الفروقات المكتشفة (للتدقيق والتحقق فقط):</span>
+                        </div>
+                        <ul className="space-y-1.5 text-[11px] text-rose-700 font-medium">
+                          {data.reconciliation.discrepancies.map((d) => (
+                            <li key={d.id} className="flex items-start gap-2 bg-white/70 p-2 rounded-lg border border-rose-100">
+                              <span className="font-mono font-bold text-rose-900 shrink-0">[{d.source}]</span>
+                              <span className="flex-1">{d.reason}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}

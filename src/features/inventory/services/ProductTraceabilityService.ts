@@ -1,5 +1,6 @@
 import { db } from '@/core/db';
 import { normalizeToISODate } from '@/utils/expiryUtils';
+import { InventoryReconciliationService, ProductReconciliationAudit } from './InventoryReconciliationService';
 
 export interface SupplierPurchaseRecord {
   invoiceId: string;
@@ -61,6 +62,7 @@ export interface ProductTraceabilitySummary {
     remainingQty: number;
     costPrice?: number;
   }>;
+  reconciliation: ProductReconciliationAudit;
 }
 
 export class ProductTraceabilityService {
@@ -338,6 +340,9 @@ export class ProductTraceabilityService {
 
     const averagePurchaseCost = totalPurchaseCostQty > 0 ? (totalPurchaseCostSum / totalPurchaseCostQty) : lastPurchaseCost;
 
+    // Run authoritative read-only reconciliation audit
+    const reconciliation = await InventoryReconciliationService.auditProduct(productId);
+
     return {
       productId,
       productName,
@@ -354,7 +359,8 @@ export class ProductTraceabilityService {
       suppliers: supplierRecords,
       customers: customerRecords,
       movements,
-      batches: activeBatches
+      batches: activeBatches,
+      reconciliation
     };
   }
 }

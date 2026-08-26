@@ -32,10 +32,13 @@ import {
 
 import {
   SubscriptionOnboardingModal,
+  SubscriptionGlobalUsageRibbon,
   SubscriptionWarningInterceptor,
   SubscriptionBlockadeBackdrop,
   TrialBlockedModal
 } from '@features/saas/components/SubscriptionWidgets';
+import { SubscriptionStatusProvider } from '@/services/saas/subscriptionStatusProvider';
+import { SubscriptionEntitlementService } from '@/services/saas/subscriptionEntitlementService';
 import { CopilotWidget } from '@features/ai/copilot';
 
 // Error Boundary Component
@@ -189,14 +192,14 @@ function MainLayout() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   useEffect(() => {
-    const onboarded = localStorage.getItem('pharmaflow_onboarded');
+    const onboarded = SubscriptionEntitlementService.hasSeenOnboardingModal();
     if (!onboarded) {
       setOnboardingOpen(true);
     }
   }, []);
 
   const handleCloseOnboarding = () => {
-    localStorage.setItem('pharmaflow_onboarded', 'true');
+    SubscriptionEntitlementService.markOnboardingModalSeen();
     setOnboardingOpen(false);
   };
 
@@ -908,6 +911,9 @@ function MainLayout() {
           </motion.div>
         )}
 
+        {/* Global SaaS Trial Usage Ribbon */}
+        <SubscriptionGlobalUsageRibbon onUpgrade={handleUpgradeTrial} />
+
         <Header 
           pageTitle={getLabel()} 
           showBackButton={currentView !== 'dashboard'} 
@@ -949,7 +955,7 @@ function MainLayout() {
                   case 'audit-history': return <RoleGuard permission="MANAGE_SYSTEM"><AuditHistoryModule onNavigate={handleNav} recordId={viewParams?.id} tableName={viewParams?.tableName} initialFilter={viewParams?.filter} /></RoleGuard>;
                   case 'reconciliation': return <RoleGuard permission="FINANCIAL_ACCESS"><ReconciliationModule onNavigate={handleNav} /></RoleGuard>;
                   case 'system-health': return <ProtectedRoute permission="MANAGE_SYSTEM"><SystemHealthModule onNavigate={handleNav} /></ProtectedRoute>;
-                  case 'invoices-archive': return <InvoicesArchiveModule onNavigate={handleNav} initialFilter={viewParams?.filter} />;
+                  case 'invoices-archive': return <InvoicesArchiveModule onNavigate={handleNav} initialFilter={viewParams?.filter} initialSearch={viewParams?.id || viewParams?.search} />;
                   case 'invoice-history': return <RoleGuard permission="MANAGE_SYSTEM"><InvoiceHistoryModule onNavigate={handleNav} /></RoleGuard>;
                   case 'adjustments-registry': return <RoleGuard permission="FINANCIAL_ACCESS"><AdjustmentsArchiveModule onNavigate={handleNav} /></RoleGuard>;
                   case 'aging-report': return <RoleGuard permission="VIEW_REPORTS"><AgingReportModule onNavigate={handleNav} /></RoleGuard>;
@@ -1015,9 +1021,11 @@ function MainLayout() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<div className="min-h-screen bg-[#F8FAFA] flex items-center justify-center font-black text-[#1E4D4D] animate-pulse">جاري تحميل النظام السيادي...</div>}>
-        <MainLayout />
-      </Suspense>
+      <SubscriptionStatusProvider>
+        <Suspense fallback={<div className="min-h-screen bg-[#F8FAFA] flex items-center justify-center font-black text-[#1E4D4D] animate-pulse">جاري تحميل النظام السيادي...</div>}>
+          <MainLayout />
+        </Suspense>
+      </SubscriptionStatusProvider>
     </ErrorBoundary>
   );
 }

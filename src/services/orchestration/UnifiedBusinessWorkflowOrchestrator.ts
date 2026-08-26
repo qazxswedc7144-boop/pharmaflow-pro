@@ -17,8 +17,8 @@ import { SupplierRepository } from '@/database/repositories/SupplierRepository';
 import { authService } from '@features/auth/services/authService';
 import { GlobalGuard } from '@/services/security/GlobalGuard';
 import { BackupService } from '@/services/backupService';
-import { useUIStore } from '@/store/useUIStore';
-import { SubscriptionService } from '@/services/saas/subscriptionService';
+import { SubscriptionEntitlementService } from '@/services/saas/subscriptionEntitlementService';
+import { UsageMeterService } from '@/services/saas/usageMeterService';
 import { generateTransactionUuid } from '@/utils/uuid';
 import { AuditService } from '@/services/system/AuditService';
 import { ErrorTrackingService } from '@/services/system/ErrorTrackingService';
@@ -136,17 +136,10 @@ const UNPOST_WORKFLOW_TABLES = [
 export class UnifiedBusinessWorkflowOrchestrator {
 
   /**
-   * Check Trial plan usage bounds
+   * Check Trial plan usage bounds and assert subscription entitlement
    */
-  private static async checkTrialLimit(isEdit = false): Promise<void> {
-    const plan = localStorage.getItem('saas_active_plan') || 'TRIAL';
-    if (plan === 'TRIAL') {
-      const usage = await SubscriptionService.getLocalUsageCount();
-      if (usage >= 200 && !isEdit) {
-        useUIStore.getState().setTrialBlockedModalOpen(true);
-        throw new Error("تم الوصول للحد التجريبي 200 عملية. يرجى الاشتراك للمتابعة.");
-      }
-    }
+  private static async checkTrialLimit(isEdit = false, operationName = 'عملية تجارية'): Promise<void> {
+    await SubscriptionEntitlementService.assertOperationAllowed(operationName, { isEdit });
   }
 
   /**
@@ -179,7 +172,7 @@ export class UnifiedBusinessWorkflowOrchestrator {
   }
 
   /**
-   * Finalize idempotency key status to COMPLETED
+   * Finalize idempotency key status to COMPLETED and invalidate usage meter cache
    */
   private static async markIdempotencyCompleted(key: string): Promise<void> {
     if (!key) return;
@@ -188,6 +181,8 @@ export class UnifiedBusinessWorkflowOrchestrator {
       status: 'COMPLETED',
       completedAt: new Date().toISOString()
     }).catch(() => null);
+    // Invalidate meter cache to update counters in real-time
+    UsageMeterService.invalidate();
   }
 
   /**
