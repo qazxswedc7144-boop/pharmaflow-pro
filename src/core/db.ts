@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import Dexie, { type Table, type Transaction } from 'dexie';
-import { useAuthStore } from '@/store/authStore';
 
 function ensureItemPrimaryKey(table: any, item: any) {
   if (!item || typeof item !== 'object') return item;
@@ -940,7 +939,7 @@ const memDb: Record<string, Map<string, any>> = {};
 
 function createMockCollection(results: any[]) {
   const coll: any = {
-    toArray: () => Promise.resolve(results),
+    toArray: () => Promise.resolve([...results]),
     count: () => Promise.resolve(results.length),
     first: () => Promise.resolve(results[0] || null),
     last: () => Promise.resolve(results[results.length - 1] || null),
@@ -949,6 +948,37 @@ function createMockCollection(results: any[]) {
     reverse: () => createMockCollection([...results].reverse()),
     filter: (fn: any) => createMockCollection(results.filter(fn)),
     and: (fn: any) => createMockCollection(results.filter(fn)),
+    sortBy: (keyPath: string) => {
+      const sorted = [...results].sort((a, b) => {
+        if (a[keyPath] < b[keyPath]) return -1;
+        if (a[keyPath] > b[keyPath]) return 1;
+        return 0;
+      });
+      return Promise.resolve(sorted);
+    },
+    clone: () => createMockCollection([...results]),
+    distinct: () => createMockCollection(Array.from(new Set(results))),
+    keys: () => Promise.resolve(results.map(r => r.id || r.key)),
+    primaryKeys: () => Promise.resolve(results.map(r => r.id || r.key)),
+    uniqueKeys: () => Promise.resolve(Array.from(new Set(results.map(r => r.id || r.key)))),
+    modify: (changesOrFn: any) => {
+      let count = 0;
+      results.forEach(item => {
+        if (typeof changesOrFn === 'function') {
+          changesOrFn(item);
+          count++;
+        } else if (typeof changesOrFn === 'object' && changesOrFn !== null) {
+          Object.assign(item, changesOrFn);
+          count++;
+        }
+      });
+      return Promise.resolve(count);
+    },
+    delete: () => Promise.resolve(results.length),
+    each: (fn: (item: any) => void) => {
+      results.forEach(fn);
+      return Promise.resolve();
+    }
   };
   return coll;
 }
@@ -959,14 +989,77 @@ function getMockTable(tableName: string) {
   }
   const store = memDb[tableName];
 
-  const whereMock = (indexOrProp?: string) => {
+  const whereMock = (indexOrProp?: any) => {
+    // If an object criteria is passed, e.g. table.where({ code: '101' })
+    if (typeof indexOrProp === 'object' && indexOrProp !== null) {
+      const entries = Object.entries(indexOrProp);
+      const results = Array.from(store.values()).filter(item => {
+        if (typeof item === 'object' && item !== null) {
+          return entries.every(([k, v]) => String(item[k]).toLowerCase() === String(v).toLowerCase());
+        }
+        return false;
+      });
+      return createMockCollection(results);
+    }
+
+    const prop = typeof indexOrProp === 'string' ? indexOrProp : '';
+
     return {
       equals: (val: any) => {
         const results = Array.from(store.values()).filter(item => {
-          if (typeof item === 'object' && item !== null) {
-            if (indexOrProp) {
-              return String(item[indexOrProp]).toLowerCase() === String(val).toLowerCase();
-            }
+          if (typeof item === 'object' && item !== null && prop) {
+            return String(item[prop]).toLowerCase() === String(val).toLowerCase();
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      equalsIgnoreCase: (val: any) => {
+        const strVal = String(val).toLowerCase();
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            return String(item[prop] ?? '').toLowerCase() === strVal;
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      startsWith: (val: any) => {
+        const prefix = String(val);
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            return String(item[prop] ?? '').startsWith(prefix);
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      startsWithIgnoreCase: (val: any) => {
+        const prefix = String(val).toLowerCase();
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            return String(item[prop] ?? '').toLowerCase().startsWith(prefix);
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      startsWithAnyOf: (prefixes: string[]) => {
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            const fieldVal = String(item[prop] ?? '');
+            return prefixes.some(p => fieldVal.startsWith(p));
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      startsWithIgnoreCaseAnyOf: (prefixes: string[]) => {
+        const lowerPrefixes = prefixes.map(p => String(p).toLowerCase());
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            const fieldVal = String(item[prop] ?? '').toLowerCase();
+            return lowerPrefixes.some(p => fieldVal.startsWith(p));
           }
           return false;
         });
@@ -974,8 +1067,17 @@ function getMockTable(tableName: string) {
       },
       above: (val: any) => {
         const results = Array.from(store.values()).filter(item => {
-          if (typeof item === 'object' && item !== null && indexOrProp) {
-            return item[indexOrProp] > val;
+          if (typeof item === 'object' && item !== null && prop) {
+            return item[prop] > val;
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      aboveOrEqual: (val: any) => {
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            return item[prop] >= val;
           }
           return false;
         });
@@ -983,8 +1085,8 @@ function getMockTable(tableName: string) {
       },
       below: (val: any) => {
         const results = Array.from(store.values()).filter(item => {
-          if (typeof item === 'object' && item !== null && indexOrProp) {
-            return item[indexOrProp] < val;
+          if (typeof item === 'object' && item !== null && prop) {
+            return item[prop] < val;
           }
           return false;
         });
@@ -992,26 +1094,69 @@ function getMockTable(tableName: string) {
       },
       belowOrEqual: (val: any) => {
         const results = Array.from(store.values()).filter(item => {
-          if (typeof item === 'object' && item !== null && indexOrProp) {
-            return item[indexOrProp] <= val;
+          if (typeof item === 'object' && item !== null && prop) {
+            return item[prop] <= val;
           }
           return false;
         });
         return createMockCollection(results);
       },
       anyOf: (vals: any[]) => {
+        const valSet = new Set(vals);
         const results = Array.from(store.values()).filter(item => {
-          if (typeof item === 'object' && item !== null && indexOrProp) {
-            return vals.includes(item[indexOrProp]);
+          if (typeof item === 'object' && item !== null && prop) {
+            return valSet.has(item[prop]);
           }
           return false;
         });
         return createMockCollection(results);
       },
-      between: (a: any, b: any) => {
+      anyOfIgnoreCase: (vals: string[]) => {
+        const valSet = new Set(vals.map(v => String(v).toLowerCase()));
         const results = Array.from(store.values()).filter(item => {
-          if (typeof item === 'object' && item !== null && indexOrProp) {
-            return item[indexOrProp] >= a && item[indexOrProp] <= b;
+          if (typeof item === 'object' && item !== null && prop) {
+            return valSet.has(String(item[prop] ?? '').toLowerCase());
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      noneOf: (vals: any[]) => {
+        const valSet = new Set(vals);
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            return !valSet.has(item[prop]);
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      notEqual: (val: any) => {
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            return item[prop] !== val;
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      between: (a: any, b: any, includeLower = true, includeUpper = true) => {
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            const v = item[prop];
+            const lowerOk = includeLower ? v >= a : v > a;
+            const upperOk = includeUpper ? v <= b : v < b;
+            return lowerOk && upperOk;
+          }
+          return false;
+        });
+        return createMockCollection(results);
+      },
+      inAnyRange: (ranges: [any, any][]) => {
+        const results = Array.from(store.values()).filter(item => {
+          if (typeof item === 'object' && item !== null && prop) {
+            const v = item[prop];
+            return ranges.some(([a, b]) => v >= a && v <= b);
           }
           return false;
         });
@@ -1097,85 +1242,25 @@ function getMockTable(tableName: string) {
   return mockTable;
 }
 
-export function getDatabaseName(tenantId?: string | null, userId?: string | null): string {
-  const t = tenantId || 'default-tenant';
-  const u = userId || 'default-user';
-  return `PharmaFlowPRO_${t}_${u}`;
+export function getDatabaseName(_tenantId?: string | null, _userId?: string | null): string {
+  return 'PharmaFlowPRO';
 }
 
-// Check initial user session to boot the correct database
-const initialSession = getCurrentUserSession();
-const storedUser = typeof window !== 'undefined' ? localStorage.getItem('pharmaflow_user') : null;
-const initialDbName = storedUser ? getDatabaseName(initialSession.tenantId, initialSession.userId) : 'PharmaFlowPRO_Guest';
+export let dbInstance = new PharmaFlowDB('PharmaFlowPRO');
 
-export let dbInstance = new PharmaFlowDB(initialDbName);
-
-export async function openUserDatabase(tenantId: string, userId: string): Promise<PharmaFlowDB> {
-  const newDbName = getDatabaseName(tenantId, userId);
-  if (dbInstance && dbInstance.name === newDbName) {
-    if (!dbInstance.isOpen()) {
+export async function openUserDatabase(_tenantId?: string, _userId?: string): Promise<PharmaFlowDB> {
+  if (!dbInstance.isOpen()) {
+    try {
       await dbInstance.open();
+    } catch (e) {
+      console.warn('[DB] openUserDatabase fallback:', e);
     }
-    return dbInstance;
-  }
-
-  if (dbInstance) {
-    console.log(`[DB] Closing previous database: ${dbInstance.name}`);
-    dbInstance.close();
-  }
-
-  console.log(`[DB] Opening user-scoped database: ${newDbName}`);
-  dbInstance = new PharmaFlowDB(newDbName);
-  isDbBlocked = false;
-  try {
-    await dbInstance.open();
-    console.log(`[DB] User-scoped database ${newDbName} opened successfully.`);
-  } catch (error) {
-    console.error(`[DB] Failed to open user-scoped database ${newDbName}:`, error);
-    isDbBlocked = true;
   }
   return dbInstance;
 }
 
 export async function closeUserDatabase(): Promise<void> {
-  if (dbInstance) {
-    console.log(`[DB] Closing user database: ${dbInstance.name}`);
-    dbInstance.close();
-  }
-  dbInstance = new PharmaFlowDB('PharmaFlowPRO_Guest');
-  isDbBlocked = false;
-  try {
-    await dbInstance.open();
-  } catch (e) {
-    console.error('[DB] Failed to open Guest database on close:', e);
-    isDbBlocked = true;
-  }
-}
-
-// Subscribe to Auth state to automatically switch user databases!
-if (typeof window !== 'undefined') {
-  try {
-    useAuthStore.subscribe((state, prevState) => {
-      const prevUser = prevState?.user;
-      const currUser = state?.user;
-
-      if (currUser && (!prevUser || prevUser.id !== currUser.id)) {
-        const tenantId = currUser.tenant_id || 'default-tenant';
-        const userId = currUser.id || 'default-user';
-        console.log(`[DB] Auth subscription detected login: tenant=${tenantId}, user=${userId}. Switching database...`);
-        openUserDatabase(tenantId, userId).catch(err => {
-          console.error('[DB] Error auto-switching DB on subscriber login:', err);
-        });
-      } else if (!currUser && prevUser) {
-        console.log('[DB] Auth subscription detected logout. Closing user database...');
-        closeUserDatabase().catch(err => {
-          console.error('[DB] Error auto-closing DB on subscriber logout:', err);
-        });
-      }
-    });
-  } catch (err) {
-    console.error('[DB] Failed to subscribe to useAuthStore:', err);
-  }
+  // Graceful no-op to maintain open database handle
 }
 
 /**

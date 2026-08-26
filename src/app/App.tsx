@@ -219,7 +219,7 @@ function MainLayout() {
         
         // 1. Immediately query the Dexie systemSettings table to resolve the status of authenticationEnabled
         const item = await db.systemSettings.get('authenticationEnabled');
-        const authEnabled = item !== undefined ? item.value === true : false;
+        const authEnabled = item ? item.value === true : false;
         
         // Align localStorage flag so that other components can pull it synchronously
         localStorage.setItem('pharmaflow_auth_enabled', authEnabled ? 'true' : 'false');
