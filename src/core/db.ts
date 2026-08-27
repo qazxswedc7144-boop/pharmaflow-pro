@@ -211,6 +211,9 @@ export class PharmaFlowDB extends Dexie {
   aliasRejections!: Table<any>;
   aliasAuditLogs!: Table<any>;
 
+  // Phase 3.3 - Controlled Inventory Correction & Human Resolution Tables
+  inventoryCorrectionCases!: Table<any>;
+
   // Legacy support for code that uses db.db
   get db(): PharmaFlowDB { return this; }
 
@@ -393,6 +396,11 @@ export class PharmaFlowDB extends Dexie {
       aliasAuditLogs: '&id, tenantId, timestamp, action, aliasType, supplierId, productId, [tenantId+timestamp]'
     });
 
+    // Version 30: Phase 3.3 - Controlled Inventory Correction & Human Resolution Schema
+    this.version(30).stores({
+      inventoryCorrectionCases: '&id, caseNumber, tenantId, branchId, productId, discrepancyType, status, createdAt, [tenantId+status], [tenantId+branchId+status], [tenantId+productId], [tenantId+caseNumber]'
+    });
+
     // Handle structural integrity and recovery
     this.on('versionchange', () => {
       console.warn("Database structure updated in another tab. Reloading...");
@@ -404,7 +412,7 @@ export class PharmaFlowDB extends Dexie {
     const targetTables = [
       'invoices', 'products', 'customers', 'suppliers', 'journalEntries',
       'accounts', 'sales', 'purchases', 'syncQueue', 'sync_queue', 'outbox',
-      'branchTransfers', 'branchInventory'
+      'branchTransfers', 'branchInventory', 'inventoryCorrectionCases'
     ];
     targetTables.forEach(tableName => {
       try {

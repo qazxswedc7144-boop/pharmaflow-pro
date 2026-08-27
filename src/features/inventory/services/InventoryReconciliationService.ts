@@ -68,6 +68,8 @@ export interface SystemInventoryAuditOptions {
   minDiscrepancy?: number;
 }
 
+export type AuditFilterCriteria = SystemInventoryAuditOptions;
+
 export interface SystemInventoryAuditReport {
   timestamp: string;
   totalProductsAudited: number;
@@ -83,6 +85,8 @@ export interface SystemInventoryAuditReport {
   productAudits: ProductReconciliationAudit[];
   overallStatus: ReconciliationStatus;
 }
+
+export type SystemReconciliationSummary = SystemInventoryAuditReport;
 
 export class InventoryReconciliationService {
   /**

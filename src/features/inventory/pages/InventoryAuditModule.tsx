@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '@/core/db';
 import { AuditItem, DailyAuditTask } from '@/types';
 import { NotificationService } from '@/context/NotificationContext';
@@ -6,13 +6,16 @@ import {
   InventoryConsistencyEngine, 
   ConsistencyAuditReport 
 } from '@features/inventory/services/InventoryConsistencyEngine';
+import { InventoryCorrectionWorkflow } from '../workflows/InventoryCorrectionWorkflow';
+import { InventoryCorrectionCaseModal } from '../components/InventoryCorrectionCaseModal';
 import { 
   AlertTriangle, CheckCircle, RefreshCw, 
   Sliders, AlertCircle, CheckSquare,
-  Wrench, Activity, Database, Check, Cpu
+  Activity, Database, Check, Cpu, ShieldCheck
 } from 'lucide-react';
 
 import { Product } from '@/types';
+import { useAuthStore } from '@/store/authStore';
 
 interface InventoryAuditModuleProps {
   lang: 'en' | 'ar';
@@ -21,6 +24,8 @@ interface InventoryAuditModuleProps {
 
 const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNavigate }) => {
   const isAr = lang === 'ar';
+  const { user, tenantId } = useAuthStore();
+
   const [task, setTask] = useState<DailyAuditTask | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isFinished, setIsFinished] = useState(false);
@@ -31,8 +36,26 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
   // advanced systemic audit states
   const [auditReport, setAuditReport] = useState<ConsistencyAuditReport | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
-  const [isRepairing, setIsRepairing] = useState(false);
   const [systemicSearch, setSystemicSearch] = useState('');
+
+  // Phase 3.3: Controlled Correction State
+  const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
+  const [activeCasesCount, setActiveCasesCount] = useState(0);
+
+  const fetchActiveCasesCount = useCallback(async () => {
+    try {
+      const activeTenant = tenantId || user?.tenantId || 'DEFAULT_TENANT';
+      const openCases = await InventoryCorrectionWorkflow.listCases({ tenantId: activeTenant });
+      const pending = openCases.filter(c => c.status !== 'RECONCILED' && c.status !== 'REJECTED');
+      setActiveCasesCount(pending.length);
+    } catch (e) {
+      console.warn('Could not fetch active cases count:', e);
+    }
+  }, [tenantId, user]);
+
+  useEffect(() => {
+    fetchActiveCasesCount();
+  }, [fetchActiveCasesCount]);
 
   // Fetch task using await inside useEffect
   useEffect(() => {
@@ -117,14 +140,38 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
   const runSystemicAudit = async () => {
     setIsAuditing(true);
     try {
-      const report = await InventoryConsistencyEngine.runFullAudit();
+      const activeTenant = tenantId || user?.tenantId || 'DEFAULT_TENANT';
+      const userCtx = {
+        userId: user?.id || 'USR-LOCAL',
+        userName: (user as any)?.name || user?.username || (isAr ? 'مستخدم النظام' : 'System User'),
+        userEmail: user?.email || '',
+        role: (user?.role?.toUpperCase() as any) || 'ADMIN',
+        tenantId: activeTenant,
+        branchId: user?.branchId || 'MAIN_BRANCH'
+      };
+
+      const [report, scanResult] = await Promise.all([
+        InventoryConsistencyEngine.runFullAudit(),
+        InventoryCorrectionWorkflow.scanAndRegisterDiscrepancies(
+          { tenantId: activeTenant },
+          userCtx
+        ).catch(e => {
+          console.warn('Scan & register cases warning:', e);
+          return { summary: {} as any, createdCasesCount: 0, newCases: [] };
+        })
+      ]);
+
+      const casesCount = scanResult?.createdCasesCount || (scanResult?.newCases ? scanResult.newCases.length : 0);
+
       setAuditReport(report);
+      await fetchActiveCasesCount();
+
       if (report.success) {
-        if (report.mismatchedProductsCount > 0) {
+        if (report.mismatchedProductsCount > 0 || casesCount > 0) {
           NotificationService.warning(
             isAr 
-              ? `تم رصد عدد ${report.mismatchedProductsCount} انحراف في حركة المخازن!` 
-              : `Found ${report.mismatchedProductsCount} ledger discrepancies!`
+              ? `تم رصد ${report.mismatchedProductsCount} انحراف وفتح ${casesCount} قضية تصحيح محكومة!` 
+              : `Found ${report.mismatchedProductsCount} deviations and registered ${casesCount} correction cases!`
           );
         } else {
           NotificationService.success(
@@ -136,31 +183,6 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
       NotificationService.error(isAr ? "فشل تشغيل محرك الجرد" : "Failed running systemic audit");
     } finally {
       setIsAuditing(false);
-    }
-  };
-
-  const repairSystemicMismatches = async () => {
-    if (!auditReport) return;
-    setIsRepairing(true);
-    try {
-      const patch = await InventoryConsistencyEngine.repairMismatches(auditReport);
-      if (patch.success) {
-        NotificationService.success(
-          isAr 
-            ? `تمت تسوية وإصلاح عدد ${patch.repairedCount} فوارق دفتري وتشغيلات وتكرارات بنجاح!` 
-            : `Successfully repaired ${patch.repairedCount} discrepancies!`
-        );
-        // Re-run audit to show everything clean and green
-        const freshReport = await InventoryConsistencyEngine.runFullAudit();
-        setAuditReport(freshReport);
-      } else {
-        NotificationService.error(isAr ? "فشلت عملية الإصلاح التلقائي" : "Repair execution failed");
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      NotificationService.error(errMsg || "Error during automatic repair");
-    } finally {
-      setIsRepairing(false);
     }
   };
 
@@ -366,16 +388,18 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
                 <span>{isAuditing ? (isAr ? "جاري الفحص المتقدم..." : "Examining Database...") : (isAr ? "تشغيل تدقيق الفواتير والمخزن 🔎" : "Execute Balance Audit 🔎")}</span>
               </button>
 
-              {auditReport && auditReport.mismatchedProductsCount > 0 && (
-                <button
-                  onClick={repairSystemicMismatches}
-                  disabled={isRepairing}
-                  className="flex-1 lg:flex-none h-14 px-8 bg-amber-500 text-white rounded-2xl flex items-center justify-center gap-2 text-xs font-black shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 border border-amber-600/10"
-                >
-                  <Wrench size={16} className={isRepairing ? "animate-spin" : ""} />
-                  <span>{isRepairing ? (isAr ? "جاري إعادة التوازن التام..." : "Balancing Ledger...") : (isAr ? "إصلاح وتصفير الانحرافات آلياً 🛠️" : "Overwrite Mismatch & Repair 🛠️")}</span>
-                </button>
-              )}
+              <button
+                onClick={() => setIsCorrectionModalOpen(true)}
+                className="flex-1 lg:flex-none h-14 px-8 bg-[#1E4D4D]/10 hover:bg-[#1E4D4D]/20 text-[#1E4D4D] border-2 border-[#1E4D4D]/20 rounded-2xl flex items-center justify-center gap-2.5 text-xs font-black shadow-sm hover:scale-[1.02] active:scale-95 transition-all relative"
+              >
+                <ShieldCheck size={18} />
+                <span>{isAr ? "إدارة قضايا التصحيح والاعتماد (Phase 3.3)" : "Correction Cases Workflow"}</span>
+                {activeCasesCount > 0 && (
+                  <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-sm">
+                    {activeCasesCount}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
 
@@ -554,6 +578,17 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
 
         </div>
       )}
+
+      {/* Phase 3.3: Controlled Inventory Correction & Human Resolution Modal */}
+      <InventoryCorrectionCaseModal
+        isOpen={isCorrectionModalOpen}
+        onClose={() => setIsCorrectionModalOpen(false)}
+        lang={lang}
+        onCasesUpdated={() => {
+          fetchActiveCasesCount();
+          runSystemicAudit();
+        }}
+      />
 
     </div>
   );
