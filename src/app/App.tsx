@@ -32,7 +32,6 @@ import {
 
 import {
   SubscriptionOnboardingModal,
-  SubscriptionGlobalUsageRibbon,
   SubscriptionWarningInterceptor,
   SubscriptionBlockadeBackdrop,
   TrialBlockedModal
@@ -250,7 +249,7 @@ function MainLayout() {
   }, []);
 
   const handleUpgradeTrial = () => {
-    handleNav('saas-portal');
+    handleNav('settings', { tab: 'subscription' });
   };
 
   // Task 4: Optimized and re-engineered ultra-fast main startup boot sequence
@@ -964,9 +963,6 @@ function MainLayout() {
           </motion.div>
         )}
 
-        {/* Global SaaS Trial Usage Ribbon */}
-        <SubscriptionGlobalUsageRibbon onUpgrade={handleUpgradeTrial} />
-
         <Header 
           pageTitle={getLabel()} 
           showBackButton={currentView !== 'dashboard'} 
@@ -1000,7 +996,7 @@ function MainLayout() {
                 switch (currentView) {
                   case 'sales': return <ProtectedRoute permission="POS_ACCESS"><SalesModule onNavigate={handleNav} /></ProtectedRoute>;
                   case 'purchases': return <ProtectedRoute permission="PURCHASE_ACCESS"><PurchasesView onNavigate={handleNav} /></ProtectedRoute>;
-                  case 'settings': return <RoleGuard permission="MANAGE_SYSTEM"><SettingsModule onNavigate={handleNav} /></RoleGuard>;
+                  case 'settings': return <RoleGuard permission="MANAGE_SYSTEM"><SettingsModule onNavigate={handleNav} initialTab={viewParams?.tab} /></RoleGuard>;
                   case 'supplier-payment': return <RoleGuard permission="CREATE_VOUCHER"><SupplierPaymentModule onNavigate={handleNav} /></RoleGuard>;
                   case 'customer-receipt': return <RoleGuard permission="CREATE_VOUCHER"><CustomerReceiptModule onNavigate={handleNav} /></RoleGuard>;
                   case 'vouchers': return <RoleGuard permission="CREATE_VOUCHER"><VouchersModule onNavigate={handleNav} initialType={viewParams?.type} /></RoleGuard>;
