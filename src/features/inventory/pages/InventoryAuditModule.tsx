@@ -19,16 +19,26 @@ import { useAuthStore } from '@/store/authStore';
 
 interface InventoryAuditModuleProps {
   lang: 'en' | 'ar';
-  onNavigate?: (view: string) => void;
+  onNavigate?: (view: string, params?: any, options?: any) => void;
+  from?: string;
 }
 
-const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNavigate }) => {
+const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNavigate, from }) => {
   const isAr = lang === 'ar';
   const { user, tenantId } = useAuthStore();
 
   const [task, setTask] = useState<DailyAuditTask | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isFinished, setIsFinished] = useState(false);
+
+  useEffect(() => {
+    // Reset window and any enclosing scroll container immediately to 0
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+    const mainEl = document.querySelector('main');
+    if (mainEl) {
+      mainEl.scrollTop = 0;
+    }
+  }, []);
 
   // Active Tab: 'daily' (original checklist) or 'systemic' (Advanced consistency report)
   const [activeTab, setActiveTab] = useState<'daily' | 'systemic'>('daily');
@@ -207,8 +217,8 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
             : 'You helped maintain 100% stock accuracy today. All records updated and mismatches logged successfully.'}
         </p>
         <button 
-          onClick={() => onNavigate?.('dashboard')}
-          className="bg-[#1E4D4D] text-white px-10 py-4 rounded-2xl font-black shadow-xl hover:scale-105 transition-transform"
+          onClick={() => onNavigate?.(from || 'dashboard', null, { replace: true })}
+          className="bg-[#1E4D4D] text-white px-10 py-4 rounded-2xl font-black shadow-xl hover:scale-105 transition-transform cursor-pointer"
         >
           {isAr ? 'العودة للرئيسية ➦' : 'Back to Dashboard ➦'}
         </button>
@@ -225,8 +235,9 @@ const InventoryAuditModule: React.FC<InventoryAuditModuleProps> = ({ lang, onNav
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-6">
           <button 
-            onClick={() => onNavigate?.('inventory')}
-            className="w-12 h-12 bg-white rounded-2xl text-[#1E4D4D] flex items-center justify-center shadow-md active:scale-90 transition-transform"
+            onClick={() => onNavigate?.(from || 'inventory', null, { replace: true })}
+            className="w-12 h-12 bg-white rounded-2xl text-[#1E4D4D] flex items-center justify-center shadow-md active:scale-90 transition-transform cursor-pointer"
+            title={from === 'dashboard' ? 'العودة للرئيسية' : 'العودة للمخازن'}
           >
             {isAr ? '➔' : '➔'}
           </button>

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, Suspense, useCallback, useTransition } from 'react';
+import React, { useState, useEffect, useRef, Suspense, useCallback, useTransition } from 'react';
 import { User, UserRole } from '@/types/auth.types';
 import { lazyWithRetry } from '@/utils/lazyWithRetry';
 import Dashboard from '@features/dashboard/pages/Dashboard';
@@ -179,6 +179,7 @@ function MainLayout() {
   }, []);
   const [viewParams, setViewParams] = useState<any>(null); 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const mainContentRef = useRef<HTMLElement>(null);
   const [, startTransition] = useTransition();
   const { setHeaderAction, refreshGlobal, setSettingsOpen } = useUI();
   const { setEditingInvoiceId } = useSalesStore();
@@ -187,6 +188,14 @@ function MainLayout() {
   const [riskScore, setRiskScore] = useState<number>(0);
   const [isLocked, setIsLocked] = useState(false);
   const [isReady, setIsReady] = useState(false);
+
+  // Reset scroll on view change
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+  }, [currentView]);
 
   // SaaS Onboarding Lifecycle hooks
   const [onboardingOpen, setOnboardingOpen] = useState(false);
@@ -644,7 +653,7 @@ function MainLayout() {
     return () => clearInterval(interval);
   }, [bgSyncInterval]);
 
-  const handleNav = useCallback((view: string, params: any = null) => {
+  const handleNav = useCallback((view: string, params: any = null, options?: { replace?: boolean }) => {
     if ((view === 'sales' || view === 'purchases') && !params?.id) {
        setEditingInvoiceId(null);
     }
@@ -652,7 +661,14 @@ function MainLayout() {
       setCurrentView(view); 
       setViewParams(params);
       const url = params?.id ? `#/${view}/${params.id}` : `#/${view}`;
-      window.location.hash = url;
+      if (options?.replace) {
+        window.history.replaceState(null, '', url);
+      } else {
+        window.location.hash = url;
+      }
+      if (mainContentRef.current) {
+        mainContentRef.current.scrollTop = 0;
+      }
     });
     setIsSidebarOpen(false);
     setHeaderAction(null);
@@ -919,10 +935,12 @@ function MainLayout() {
           showBackButton={currentView !== 'dashboard'} 
           onBackClick={() => {
             const view = currentView as any;
-            if (view.startsWith?.('reports/') || view === 'aging-report') {
-              handleNav('reports');
+            if (viewParams?.from) {
+              handleNav(viewParams.from, null, { replace: true });
+            } else if (view.startsWith?.('reports/') || view === 'aging-report') {
+              handleNav('reports', null, { replace: true });
             } else {
-              handleNav('dashboard');
+              handleNav('dashboard', null, { replace: true });
             }
           }} 
           onMenuClick={() => setIsSidebarOpen(true)}
@@ -930,7 +948,7 @@ function MainLayout() {
           currentView={currentView}
         />
 
-        <main className={`flex-1 min-h-0 relative ${
+        <main ref={mainContentRef} className={`flex-1 min-h-0 relative ${
           ['sales', 'purchases'].includes(currentView)
             ? 'h-full overflow-hidden p-0 w-full max-w-[540px] md:max-w-xl mx-auto flex flex-col bg-white'
             : 'overflow-y-auto overflow-x-hidden bg-[#F8FAFA] custom-scrollbar w-full max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-6'
@@ -950,9 +968,9 @@ function MainLayout() {
                   case 'customer-receipt': return <RoleGuard permission="CREATE_VOUCHER"><CustomerReceiptModule onNavigate={handleNav} /></RoleGuard>;
                   case 'vouchers': return <RoleGuard permission="CREATE_VOUCHER"><VouchersModule onNavigate={handleNav} initialType={viewParams?.type} /></RoleGuard>;
                   case 'inventory': return <InventoryModule onNavigate={handleNav} />;
-                  case 'inventory-audit': return <InventoryAuditModule lang="ar" onNavigate={handleNav} />;
+                  case 'inventory-audit': return <InventoryAuditModule lang="ar" onNavigate={handleNav} from={viewParams?.from} />;
                   case 'accounting': return <ProtectedRoute permission="FINANCIAL_ACCESS"><AccountingModule onNavigate={handleNav} /></ProtectedRoute>;
-                  case 'audit-history': return <RoleGuard permission="MANAGE_SYSTEM"><AuditHistoryModule onNavigate={handleNav} recordId={viewParams?.id} tableName={viewParams?.tableName} initialFilter={viewParams?.filter} /></RoleGuard>;
+                  case 'audit-history': return <RoleGuard permission="MANAGE_SYSTEM"><AuditHistoryModule onNavigate={handleNav} recordId={viewParams?.id} tableName={viewParams?.tableName} initialFilter={viewParams?.filter} from={viewParams?.from} /></RoleGuard>;
                   case 'reconciliation': return <RoleGuard permission="FINANCIAL_ACCESS"><ReconciliationModule onNavigate={handleNav} /></RoleGuard>;
                   case 'system-health': return <ProtectedRoute permission="MANAGE_SYSTEM"><SystemHealthModule onNavigate={handleNav} /></ProtectedRoute>;
                   case 'invoices-archive': return <InvoicesArchiveModule onNavigate={handleNav} initialFilter={viewParams?.filter} initialSearch={viewParams?.id || viewParams?.search} />;
@@ -970,7 +988,7 @@ function MainLayout() {
                   case 'branch-transfers': return <RoleGuard permission="BRANCH_TRANSFER"><BranchTransfers onNavigate={handleNav} initialTab={viewParams?.tab} initialStatus={viewParams?.status} /></RoleGuard>;
                   case 'branch-reports': return <RoleGuard permission="BRANCH_REPORT"><BranchReports onNavigate={handleNav} /></RoleGuard>;
                   case 'consolidation': return <RoleGuard permission="FINANCIAL_ACCESS"><ConsolidationDashboard onNavigate={handleNav} /></RoleGuard>;
-                  case 'security-audit': return <RoleGuard permission="MANAGE_SYSTEM"><SecurityAuditDashboard onNavigate={handleNav} initialTab={viewParams?.tab} /></RoleGuard>;
+                  case 'security-audit': return <RoleGuard permission="MANAGE_SYSTEM"><SecurityAuditDashboard onNavigate={handleNav} initialTab={viewParams?.tab} from={viewParams?.from} /></RoleGuard>;
                   
                   case 'reports/remaining-stock': return <RoleGuard permission="VIEW_REPORTS"><RemainingStockReport onNavigate={handleNav} /></RoleGuard>;
                   case 'reports/item-profits': return <RoleGuard permission="VIEW_REPORTS"><ItemProfitsReport onNavigate={handleNav} /></RoleGuard>;

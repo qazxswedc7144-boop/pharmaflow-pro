@@ -110,7 +110,7 @@ async function startServer() {
     }, 100);
   }
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   
   // Clean up any stale processes in development if needed
   if (process.env.NODE_ENV !== "production") {
@@ -122,8 +122,14 @@ async function startServer() {
   app.set("trust proxy", 1); // Respect reverse proxy headers (e.g., Cloud Run, Nginx router) for rate-limiting
 
   // Top-level endpoints to support load balancer and ingress orchestrator health and readiness probes (First priority, unthrottled)
-  app.get(["/api/health", "/health", "/healthz", "/ready", "/_ah/health", "/_health"], (_req, res) => {
-    res.status(200).json({ status: "ok", mode: process.env.NODE_ENV || "development", db_host: process.env.DATABASE_URL ? "configured" : "fallback" });
+  app.all(["/api/health", "/health", "/healthz", "/ready", "/_ah/health", "/_health", "/ping"], (_req, res) => {
+    res.status(200).json({ 
+      status: "ok", 
+      mode: process.env.NODE_ENV || "development", 
+      db_host: process.env.DATABASE_URL ? "configured" : "fallback",
+      port: PORT,
+      timestamp: new Date().toISOString()
+    });
   });
 
   // Production and Preview HTTP Traffic Logger Diagnostics
