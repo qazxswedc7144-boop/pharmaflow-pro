@@ -211,22 +211,45 @@ export class SubscriptionEntitlementService {
   }
 
   /**
-   * Checks if user has already viewed the onboarding welcome modal for this tenant
+   * Single Authoritative Decision Rule:
+   * Determines whether the Subscription Onboarding / Welcome modal should be shown upon app launch.
+   *
+   * Logic:
+   * ACTIVE SUBSCRIPTION AND plan != TRIAL AND expiresAt > now -> return false (HIDE)
+   * In all other cases (TRIAL, EXPIRED, CANCELLED, BLOCKED, NO ACTIVE SUBSCRIPTION) -> return true (SHOW)
    */
-  static hasSeenOnboardingModal(tenantId?: string): boolean {
-    const activeTenant = tenantId || getCurrentUserSession()?.tenantId || 'default-tenant';
-    if (typeof localStorage === 'undefined') return false;
-    return localStorage.getItem(`pharmaflow_onboarding_welcomed_${activeTenant}`) === 'true';
+  static shouldShowSubscriptionOnboarding(entitlement: SubscriptionEntitlement | null | undefined): boolean {
+    return shouldShowSubscriptionOnboarding(entitlement);
   }
 
   /**
-   * Marks the onboarding welcome modal as viewed (UX preference)
+   * In-memory session tracking for dismissed state during active app execution.
+   * Resets automatically when app/tab is reloaded or reopened.
+   */
+  private static _sessionDismissedMap: Record<string, boolean> = {};
+
+  static hasDismissedInCurrentSession(tenantId?: string): boolean {
+    const activeTenant = tenantId || getCurrentUserSession()?.tenantId || 'default-tenant';
+    return !!this._sessionDismissedMap[activeTenant];
+  }
+
+  static markDismissedForCurrentSession(tenantId?: string): void {
+    const activeTenant = tenantId || getCurrentUserSession()?.tenantId || 'default-tenant';
+    this._sessionDismissedMap[activeTenant] = true;
+  }
+
+  /**
+   * Legacy method maintained for backward compatibility; delegates to session memory.
+   */
+  static hasSeenOnboardingModal(tenantId?: string): boolean {
+    return this.hasDismissedInCurrentSession(tenantId);
+  }
+
+  /**
+   * Legacy method maintained for backward compatibility; delegates to session memory.
    */
   static markOnboardingModalSeen(tenantId?: string): void {
-    const activeTenant = tenantId || getCurrentUserSession()?.tenantId || 'default-tenant';
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(`pharmaflow_onboarding_welcomed_${activeTenant}`, 'true');
-    }
+    this.markDismissedForCurrentSession(tenantId);
   }
 
   /**
@@ -250,3 +273,35 @@ export class SubscriptionEntitlementService {
     UsageMeterService.invalidate(license.tenantId);
   }
 }
+
+/**
+ * Single Central Decision Rule:
+ * Determines whether the Subscription Onboarding / Welcome Modal should be shown.
+ *
+ * Rules:
+ * ACTIVE SUBSCRIPTION AND plan != TRIAL AND expiresAt > now
+ *   -> return false (HIDE ONBOARDING)
+ * In all other cases (NO ACTIVE SUBSCRIPTION, TRIAL, EXPIRED, CANCELLED, BLOCKED)
+ *   -> return true (SHOW ONBOARDING)
+ */
+export function shouldShowSubscriptionOnboarding(
+  entitlement: SubscriptionEntitlement | null | undefined
+): boolean {
+  if (!entitlement) {
+    return true; // No status -> SHOW
+  }
+
+  const isPaidPlan = entitlement.plan === 'BASIC' || entitlement.plan === 'BUSINESS' || entitlement.plan === 'ENTERPRISE';
+  const isActive = entitlement.subscriptionStatus === 'ACTIVE';
+
+  const nowTime = Date.now();
+  const expiryTime = entitlement.expiresAt ? new Date(entitlement.expiresAt).getTime() : 0;
+  const isNotExpired = !isNaN(expiryTime) && expiryTime > nowTime;
+
+  if (isActive && isPaidPlan && isNotExpired) {
+    return false; // HIDE ONBOARDING
+  }
+
+  return true; // SHOW ONBOARDING
+}
+

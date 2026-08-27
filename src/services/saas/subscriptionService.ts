@@ -4,7 +4,8 @@ import {
   SubscriptionEntitlementService, 
   SubscriptionEntitlement, 
   SubscriptionPlanCode,
-  SubscriptionStatusCode 
+  SubscriptionStatusCode,
+  shouldShowSubscriptionOnboarding
 } from "./subscriptionEntitlementService";
 
 export interface SubscriptionStatus {
@@ -22,10 +23,28 @@ export interface SubscriptionStatus {
   allowedUsers: number;
 }
 
-export { SubscriptionEntitlementService, UsageMeterService };
+export { SubscriptionEntitlementService, UsageMeterService, shouldShowSubscriptionOnboarding };
 export type { SubscriptionEntitlement, SubscriptionPlanCode, SubscriptionStatusCode };
 
 export class SubscriptionService {
+  /**
+   * Authoritative Central Rule to determine if the Welcome Onboarding modal should be displayed.
+   */
+  static shouldShowSubscriptionOnboarding(
+    statusOrEntitlement: SubscriptionStatus | SubscriptionEntitlement | null | undefined
+  ): boolean {
+    if (!statusOrEntitlement) return true;
+    if ('subscriptionStatus' in statusOrEntitlement) {
+      return shouldShowSubscriptionOnboarding(statusOrEntitlement);
+    }
+    const ent: Partial<SubscriptionEntitlement> = {
+      plan: statusOrEntitlement.planCode,
+      subscriptionStatus: statusOrEntitlement.isActive ? 'ACTIVE' : 'EXPIRED',
+      expiresAt: statusOrEntitlement.expiresAt,
+    };
+    return shouldShowSubscriptionOnboarding(ent as SubscriptionEntitlement);
+  }
+
   /**
    * Calculates structural operations performed by active tenant.
    * Scans local IndexedDB tables for high-integrity audit.

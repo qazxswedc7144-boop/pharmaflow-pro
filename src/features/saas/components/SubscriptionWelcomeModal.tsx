@@ -1,5 +1,5 @@
 // src/features/saas/components/SubscriptionWelcomeModal.tsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, 
@@ -12,6 +12,7 @@ import {
   Activity, 
   Zap
 } from 'lucide-react';
+import { useUIStore } from '@/store/useUIStore';
 import { SubscriptionContactFooter, UNIFIED_SUPPORT_NUMBER } from './SubscriptionContactFooter';
 
 export interface SubscriptionWelcomeModalProps {
@@ -29,6 +30,17 @@ export const SubscriptionWelcomeModal: React.FC<SubscriptionWelcomeModalProps> =
   supportNumber = UNIFIED_SUPPORT_NUMBER,
   systemVersion = "2.5.0"
 }) => {
+  const setSubscriptionOnboardingOpen = useUIStore((state) => state.setSubscriptionOnboardingOpen);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSubscriptionOnboardingOpen(true);
+    }
+    return () => {
+      setSubscriptionOnboardingOpen(false);
+    };
+  }, [isOpen, setSubscriptionOnboardingOpen]);
+
   if (!isOpen) return null;
 
   const handleStart = () => {
@@ -42,7 +54,7 @@ export const SubscriptionWelcomeModal: React.FC<SubscriptionWelcomeModalProps> =
     <AnimatePresence>
       <div 
         id="subscription-welcome-modal-overlay"
-        className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[1000] flex items-center justify-center p-2.5 sm:p-6 overflow-hidden overscroll-none" 
+        className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[2500] flex items-center justify-center p-2.5 sm:p-6 overflow-hidden overscroll-none" 
         dir="rtl"
         style={{
           minHeight: '100dvh',

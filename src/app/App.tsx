@@ -38,7 +38,10 @@ import {
   TrialBlockedModal
 } from '@features/saas/components/SubscriptionWidgets';
 import { SubscriptionStatusProvider } from '@/services/saas/subscriptionStatusProvider';
-import { SubscriptionEntitlementService } from '@/services/saas/subscriptionEntitlementService';
+import { 
+  SubscriptionEntitlementService,
+  shouldShowSubscriptionOnboarding 
+} from '@/services/saas/subscriptionEntitlementService';
 import { CopilotWidget } from '@features/ai/copilot';
 
 // Error Boundary Component
@@ -197,20 +200,54 @@ function MainLayout() {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
   }, [currentView]);
 
-  // SaaS Onboarding Lifecycle hooks
+  // SaaS Onboarding Lifecycle hooks — Evaluated strictly via authoritative subscription status
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   useEffect(() => {
-    const onboarded = SubscriptionEntitlementService.hasSeenOnboardingModal();
-    if (!onboarded) {
-      setOnboardingOpen(true);
-    }
+    let isMounted = true;
+
+    const evaluateOnboardingStatus = async () => {
+      try {
+        const ent = await SubscriptionEntitlementService.getAuthoritativeEntitlement();
+        if (!isMounted) return;
+
+        const shouldShow = shouldShowSubscriptionOnboarding(ent);
+        const hasDismissedInSession = SubscriptionEntitlementService.hasDismissedInCurrentSession();
+
+        if (shouldShow && !hasDismissedInSession) {
+          setOnboardingOpen(true);
+        } else {
+          setOnboardingOpen(false);
+        }
+      } catch (e) {
+        console.warn('[App] Error evaluating onboarding status:', e);
+        if (!SubscriptionEntitlementService.hasDismissedInCurrentSession()) {
+          setOnboardingOpen(true);
+        }
+      }
+    };
+
+    evaluateOnboardingStatus();
+
+    const handleSubscriptionUpdate = () => {
+      evaluateOnboardingStatus();
+    };
+
+    window.addEventListener('saas-usage-updated', handleSubscriptionUpdate);
+    window.addEventListener('storage', handleSubscriptionUpdate);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('saas-usage-updated', handleSubscriptionUpdate);
+      window.removeEventListener('storage', handleSubscriptionUpdate);
+    };
   }, []);
 
-  const handleCloseOnboarding = () => {
-    SubscriptionEntitlementService.markOnboardingModalSeen();
+  const handleCloseOnboarding = useCallback(() => {
+    // Dismiss for the active in-memory session only; does NOT permanently prevent showing on next app boot
+    SubscriptionEntitlementService.markDismissedForCurrentSession();
     setOnboardingOpen(false);
-  };
+  }, []);
 
   const handleUpgradeTrial = () => {
     handleNav('saas-portal');
@@ -1028,8 +1065,8 @@ function MainLayout() {
           </div>
         </main>
 
-        {/* Smart Pharmacy Copilot Floating Launcher - Dashboard Only */}
-        {currentView === 'dashboard' && <CopilotWidget />}
+        {/* Smart Pharmacy Copilot Floating Launcher - Dashboard Only (Suppressed while Onboarding Modal is open) */}
+        {currentView === 'dashboard' && !onboardingOpen && <CopilotWidget />}
       </div>
     </div>
     </MotionConfig>
