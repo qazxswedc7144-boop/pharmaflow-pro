@@ -16,11 +16,16 @@ export class DeviceManager {
    * Generates or retrieves persistent device identity
    */
   static getDeviceIdentity(): DeviceMetadata {
-    if (this.cachedIdentity) {
-      return this.cachedIdentity;
-    }
-
     const session = getCurrentUserSession();
+
+    if (this.cachedIdentity) {
+      return {
+        ...this.cachedIdentity,
+        tenantId: session.tenantId || this.cachedIdentity.tenantId,
+        branchId: session.branchId || this.cachedIdentity.branchId,
+        userId: session.userId || this.cachedIdentity.userId
+      };
+    }
 
     if (typeof window !== "undefined" && window.localStorage) {
       try {
@@ -43,7 +48,10 @@ export class DeviceManager {
     }
 
     // Generate fresh persistent device ID
-    const newDeviceId = `DEV-${crypto.randomUUID().substring(0, 12).toUpperCase()}`;
+    const randomUuid = (typeof crypto !== "undefined" && crypto.randomUUID) 
+      ? crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 15);
+    const newDeviceId = `DEV-${randomUuid.substring(0, 12).toUpperCase()}`;
     const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "Desktop POS";
     const deviceName = userAgent.includes("Android") 
       ? "Android POS Terminal" 

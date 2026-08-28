@@ -20,7 +20,7 @@ export function generateIdempotencyKey(): string {
 }
 
 /**
- * Enterprise pre-configured Axios instance
+ * Enterprise pre-configured Axios instance for Financial / Consolidation API calls.
  */
 export const financialApiClient = axios.create({
   headers: {
@@ -29,34 +29,49 @@ export const financialApiClient = axios.create({
 });
 
 /**
- * Request Interceptor: Ensures state-mutating requests carry Idempotency-Key 
- * and auto-injects auth headers via Central Token Provider.
+ * Request Interceptor: Ensures state-mutating requests carry Idempotency-Key,
+ * Request ID, Device ID, and auto-injects auth headers via Central Token Provider.
  */
 financialApiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return Promise.reject(new Error("NETWORK_OFFLINE: Request blocked while offline"));
+    }
+
     const isMutating = ["POST", "PUT", "DELETE", "PATCH"].includes(
       config.method?.toUpperCase() || ""
     );
 
     if (isMutating) {
       const existingKey = config.headers.get("Idempotency-Key") || config.headers["Idempotency-Key"];
-      
       if (!existingKey) {
         const key = generateIdempotencyKey();
         config.headers.set("Idempotency-Key", key);
+        config.headers.set("X-Idempotency-Key", key);
       }
     }
-    
-    // Auto-inject auth headers via Central Token Provider
+
+    if (!config.headers.get("X-Request-ID")) {
+      config.headers.set("X-Request-ID", generateIdempotencyKey());
+    }
+
+    // Auto-inject context & auth headers via Central Token Provider
     const authHeaders = TokenProvider.getAuthHeaders();
-    if (authHeaders.Authorization && !config.headers.Authorization) {
+    if (authHeaders.Authorization && !config.headers.get("Authorization")) {
       config.headers.set("Authorization", authHeaders.Authorization);
     }
-    if (authHeaders['x-tenant-id'] && !config.headers.get('x-tenant-id')) {
-      config.headers.set('x-tenant-id', authHeaders['x-tenant-id']);
+    if (authHeaders["x-tenant-id"] && !config.headers.get("x-tenant-id")) {
+      config.headers.set("x-tenant-id", authHeaders["x-tenant-id"]);
+      config.headers.set("X-Tenant-ID", authHeaders["x-tenant-id"]);
     }
-    if (authHeaders['x-branch-id'] && !config.headers.get('x-branch-id')) {
-      config.headers.set('x-branch-id', authHeaders['x-branch-id']);
+    if (authHeaders["x-branch-id"] && !config.headers.get("x-branch-id")) {
+      config.headers.set("x-branch-id", authHeaders["x-branch-id"]);
+      config.headers.set("X-Branch-ID", authHeaders["x-branch-id"]);
+    }
+
+    const session = TokenProvider.getCurrentSession();
+    if (session.user?.id && !config.headers.get("X-User-ID")) {
+      config.headers.set("X-User-ID", session.user.id);
     }
 
     return config;
@@ -74,11 +89,15 @@ financialApiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return Promise.reject(error);
+      }
+
       originalRequest._retry = true;
       try {
         const newAccessToken = await TokenProvider.refreshAccessToken();
         if (newAccessToken && originalRequest.headers) {
-          originalRequest.headers.set('Authorization', `Bearer ${newAccessToken}`);
+          originalRequest.headers.set("Authorization", `Bearer ${newAccessToken}`);
           return financialApiClient(originalRequest);
         }
       } catch (refreshErr) {
@@ -88,4 +107,3 @@ financialApiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-

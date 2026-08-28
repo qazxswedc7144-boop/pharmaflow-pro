@@ -132,11 +132,20 @@ export class TokenProvider {
   public static setSession(
     user: User | null, 
     accessToken: string | null, 
-    refreshToken?: string | null, 
+    refreshTokenOrContext?: string | TenantAuthContext | null, 
     context?: TenantAuthContext
   ): void {
+    let refreshToken: string | null = null;
+    let tenantContext: TenantAuthContext | undefined = context;
+
+    if (typeof refreshTokenOrContext === 'string') {
+      refreshToken = refreshTokenOrContext;
+    } else if (refreshTokenOrContext && typeof refreshTokenOrContext === 'object') {
+      tenantContext = refreshTokenOrContext;
+    }
+
     if (user && accessToken) {
-      useAuthStore.getState().login(user, accessToken, context, refreshToken);
+      useAuthStore.getState().login(user, accessToken, tenantContext, refreshToken);
       this.syncLegacyStorageKeys(user, accessToken, refreshToken);
     } else {
       this.clearSession();

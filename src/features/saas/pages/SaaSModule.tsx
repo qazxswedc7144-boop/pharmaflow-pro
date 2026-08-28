@@ -13,6 +13,7 @@ import { FHIRService } from '../integrations/fhirService';
 import { ApiGatewayService, ApiKeyConfig } from '../api/apiGateway';
 import { ReviewerSaaSTester } from '@features/saas/components/SubscriptionWidgets';
 import { NotificationService } from '@/context/NotificationContext';
+import { unifiedTransport } from '@/shared/network/transport/unifiedTransport';
 
 interface SaaSModuleProps {
   onNavigate?: (view: string) => void;
@@ -119,16 +120,11 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
     setIsLoadingMetrics(true);
     setMetricsError('');
     try {
-      const response = await fetch('/api/saas/metrics', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        }
-      });
-      const data = await response.json();
-      if (data.success) {
+      const data: any = await unifiedTransport.get('/api/saas/metrics');
+      if (data && data.success) {
         setPlatformMetrics(data.metrics);
       } else {
-        setMetricsError(data.message || 'فشل تحميل بيانات دور مالك المنصة.');
+        setMetricsError(data?.message || 'فشل تحميل بيانات دور مالك المنصة.');
         // Fallback for demo when JWT role is not PLATFORM_OWNER yet
         setPlatformMetrics({
           totalTenants: 12,
@@ -161,13 +157,8 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
    */
   const fetchSubscriptionLimitStatus = async () => {
     try {
-      const response = await fetch(`/api/saas/subscription-status/${tenantId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        }
-      });
-      const data = await response.json();
-      if (data.success) {
+      const data: any = await unifiedTransport.get(`/api/saas/subscription-status/${tenantId}`);
+      if (data && data.success) {
         setSubLimitData({
           allowed: data.allowed,
           current: data.current,

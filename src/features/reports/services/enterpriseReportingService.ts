@@ -4,7 +4,7 @@
 import { ReportEngine } from '@/services/reports/reportEngine';
 import { ExportService } from '@/services/data/exportService';
 import { db } from '@/core/db';
-import { authService } from '@/features/auth/services/authService';
+import { TokenProvider } from '@/services/auth/tokenProvider';
 
 export type ReportType =
   | 'balance-sheet'
@@ -82,24 +82,12 @@ export class EnterpriseReportingService {
    * Retrieves active tenant and auth headers for reporting requests
    */
   private static getAuthContext() {
-    let user: any = null;
-    try {
-      user = authService.getCurrentUser();
-    } catch {
-      // Ignored in test environment
-    }
-    
-    let token = '';
-    if (typeof localStorage !== 'undefined') {
-      try {
-        token = localStorage.getItem('token') || localStorage.getItem('auth_token') || '';
-      } catch {
-        // Ignored
-      }
-    }
+    const session = TokenProvider.getCurrentSession();
+    const user = session.user;
+    const token = TokenProvider.getAccessToken() || '';
 
-    const tenantId = user?.TenantId || user?.tenantId || 'DEFAULT_PHARMA_TENANT';
-    const userId = user?.id || user?.User_ID || 'admin';
+    const tenantId = session.tenantId || user?.tenant_id || user?.tenantId || 'DEFAULT_PHARMA_TENANT';
+    const userId = user?.id || user?.user_id || 'admin';
     const userRole = user?.Role || user?.role || 'ADMIN';
 
     return {

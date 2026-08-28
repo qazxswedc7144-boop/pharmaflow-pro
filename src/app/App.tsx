@@ -600,7 +600,7 @@ function MainLayout() {
       try {
         await db.open();
         // Dynamic Sync engine activation
-        syncEngine = new DistributedSyncEngine(db);
+        syncEngine = DistributedSyncEngine.getInstance(db);
         syncEngine.start();
       } catch (e) {
         console.error("Failed to open DB:", e);
