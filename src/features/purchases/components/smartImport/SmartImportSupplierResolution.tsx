@@ -1,7 +1,7 @@
 // src/features/purchases/components/smartImport/SmartImportSupplierResolution.tsx
 /**
  * PharmaFlow PRO ERP — Sovereign Enterprise Edition
- * Phase 2.4: Human Resolution UX — Supplier Resolution Card
+ * Mobile-First Enterprise Human Resolution UX — Invoice Data & Supplier Resolution Center
  */
 
 import React, { useState } from 'react';
@@ -18,19 +18,29 @@ import {
   UserPlus, 
   Search, 
   Sparkles,
-  Ban
+  Ban,
+  Calendar,
+  Hash
 } from 'lucide-react';
 
 interface SmartImportSupplierResolutionProps {
   supplierDecision: SupplierDecision;
   availableSuppliers: Supplier[];
   onChange: (update: Partial<SupplierDecision>) => void;
+  detectedInvoiceNumber?: string;
+  detectedDate?: string;
+  onUpdateInvoiceNumber?: (invNum: string) => void;
+  onUpdateInvoiceDate?: (date: string) => void;
 }
 
 export const SmartImportSupplierResolution: React.FC<SmartImportSupplierResolutionProps> = ({
   supplierDecision,
   availableSuppliers,
-  onChange
+  onChange,
+  detectedInvoiceNumber,
+  detectedDate,
+  onUpdateInvoiceNumber,
+  onUpdateInvoiceDate
 }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -52,31 +62,31 @@ export const SmartImportSupplierResolution: React.FC<SmartImportSupplierResoluti
     switch (supplierDecision.status) {
       case SupplierResolutionStatus.EXACT_MATCH:
         return (
-          <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-black flex items-center gap-1">
-            <CheckCircle2 size={13} />
+          <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-black flex items-center gap-1">
+            <CheckCircle2 size={12} />
             تطابق تام (100%)
           </span>
         );
       case SupplierResolutionStatus.HIGH_CONFIDENCE_MATCH:
         return (
-          <span className="px-2.5 py-1 rounded-lg bg-teal-100 text-teal-800 text-[11px] font-black flex items-center gap-1">
-            <Sparkles size={13} />
+          <span className="px-2 py-0.5 rounded-lg bg-teal-100 text-teal-800 text-[10px] font-black flex items-center gap-1">
+            <Sparkles size={12} />
             مطابقة موثوقة ({Math.round(supplierDecision.confidence * 100)}%)
           </span>
         );
       case SupplierResolutionStatus.POSSIBLE_MATCH:
       case SupplierResolutionStatus.AMBIGUOUS:
         return (
-          <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-black flex items-center gap-1">
-            <AlertCircle size={13} />
+          <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[10px] font-black flex items-center gap-1">
+            <AlertCircle size={12} />
             مورد مقترح (يتطلب تأكيد)
           </span>
         );
       case SupplierResolutionStatus.NEW_SUPPLIER:
       default:
         return (
-          <span className="px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800 text-[11px] font-black flex items-center gap-1">
-            <UserPlus size={13} />
+          <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-800 text-[10px] font-black flex items-center gap-1">
+            <UserPlus size={12} />
             مورد جديد غير مسجل
           </span>
         );
@@ -121,37 +131,92 @@ export const SmartImportSupplierResolution: React.FC<SmartImportSupplierResoluti
     setShowNewSupplierForm(false);
   };
 
+  const isInvoiceNumDetected = Boolean(detectedInvoiceNumber && detectedInvoiceNumber.trim() && !detectedInvoiceNumber.startsWith('ERR-') && !detectedInvoiceNumber.startsWith('INV-IMP-'));
+
   return (
     <div 
       id="smart-import-supplier-card"
-      className="p-3.5 bg-white border border-slate-200/90 rounded-2xl shadow-2xs font-cairo space-y-3"
+      className="p-3 sm:p-3.5 bg-white border border-slate-200/90 rounded-2xl shadow-2xs font-cairo space-y-2.5"
     >
-      {/* Header Row */}
+      {/* SECTION TITLE & INVOICE META BAR */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-2 border-b border-slate-100">
+        {/* Invoice Number */}
+        <div className="flex items-center gap-2 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200/70">
+          <Hash size={14} className="text-slate-500 shrink-0" />
+          <span className="text-[11px] font-bold text-slate-500 shrink-0">رقم الفاتورة:</span>
+          {isInvoiceNumDetected ? (
+            <span className="text-xs font-mono font-black text-slate-900 truncate">
+              {detectedInvoiceNumber}
+            </span>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-black shrink-0 flex items-center gap-1">
+                <AlertCircle size={10} />
+                غير مكتشف
+              </span>
+              {onUpdateInvoiceNumber && (
+                <input
+                  type="text"
+                  placeholder="أدخل رقم الفاتورة يدويًا..."
+                  className="bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-slate-800 focus:outline-none flex-1 min-w-0"
+                  onChange={(e) => onUpdateInvoiceNumber(e.target.value)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Invoice Date */}
+        <div className="flex items-center gap-2 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200/70">
+          <Calendar size={14} className="text-slate-500 shrink-0" />
+          <span className="text-[11px] font-bold text-slate-500 shrink-0">تاريخ الفاتورة:</span>
+          {detectedDate ? (
+            <span className="text-xs font-mono font-black text-slate-900 truncate">
+              {detectedDate}
+            </span>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold shrink-0">
+                تلقائي (اليوم)
+              </span>
+              {onUpdateInvoiceDate && (
+                <input
+                  type="date"
+                  className="bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-slate-800 focus:outline-none flex-1 min-w-0"
+                  onChange={(e) => onUpdateInvoiceDate(e.target.value)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* SUPPLIER ROW */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-[#1E4D4D]/10 text-[#1E4D4D] rounded-xl">
-            <Building2 size={18} />
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-1.5 bg-[#1E4D4D]/10 text-[#1E4D4D] rounded-xl shrink-0">
+            <Building2 size={16} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <h4 className="text-xs font-black text-slate-800">
                 المورد المستورد:{' '}
                 <span className="text-[#1E4D4D] font-mono">
-                  {supplierDecision.importedSupplierName || 'غير محدد بالملف'}
+                  {supplierDecision.importedSupplierName || 'غير مكتشف'}
                 </span>
               </h4>
               {getStatusBadge()}
             </div>
-            {supplierDecision.reason && (
-              <p className="text-[10px] text-slate-500 font-bold mt-0.5">
-                {supplierDecision.reason}
+            {supplierDecision.matchedSupplierName && (
+              <p className="text-[10px] text-emerald-700 font-bold mt-0.5 truncate">
+                المورد المطابق: <strong className="underline">{supplierDecision.matchedSupplierName}</strong>
               </p>
             )}
           </div>
         </div>
 
         {/* Quick Decision Actions */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 flex-wrap shrink-0">
           <button
             id="btn-search-supplier"
             type="button"
@@ -159,38 +224,38 @@ export const SmartImportSupplierResolution: React.FC<SmartImportSupplierResoluti
               setIsSearching(!isSearching);
               setShowNewSupplierForm(false);
             }}
-            className="px-2.5 py-1 text-[11px] font-black bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg flex items-center gap-1 transition-all"
+            className="min-h-[34px] px-2.5 py-1 text-[11px] font-black bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg flex items-center gap-1 transition-all whitespace-nowrap flex-shrink-0"
           >
             <Search size={12} />
-            <span>{isSearching ? 'إغلاق البحث' : 'بحث عن مورد مسجل'}</span>
+            <span>{isSearching ? 'إغلاق' : '🔎 بحث وربط'}</span>
           </button>
 
           <button
             id="btn-create-supplier"
             type="button"
             onClick={handleCreateNewClick}
-            className={`px-2.5 py-1 text-[11px] font-black rounded-lg flex items-center gap-1 transition-all ${
+            className={`min-h-[34px] px-2.5 py-1 text-[11px] font-black rounded-lg flex items-center gap-1 transition-all whitespace-nowrap flex-shrink-0 ${
               supplierDecision.action === SupplierResolutionAction.CREATE_NEW
                 ? 'bg-blue-600 text-white shadow-2xs'
                 : 'bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200'
             }`}
           >
             <UserPlus size={12} />
-            <span>إنشاء مورد جديد</span>
+            <span>➕ مورد جديد</span>
           </button>
 
           <button
             id="btn-skip-supplier"
             type="button"
             onClick={handleSkipSupplier}
-            className={`px-2 py-1 text-[11px] font-black rounded-lg flex items-center gap-1 transition-all ${
+            className={`min-h-[34px] px-2.5 py-1 text-[11px] font-black rounded-lg flex items-center gap-1 transition-all whitespace-nowrap flex-shrink-0 ${
               supplierDecision.isSkipped
                 ? 'bg-slate-700 text-white shadow-2xs'
                 : 'bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200'
             }`}
           >
             <Ban size={12} />
-            <span>تخطي</span>
+            <span>🚫 تخطي</span>
           </button>
         </div>
       </div>
@@ -198,8 +263,8 @@ export const SmartImportSupplierResolution: React.FC<SmartImportSupplierResoluti
       {/* Suggested Supplier Match Cards (if any) */}
       {!isSearching && !showNewSupplierForm && supplierDecision.suggestedSuppliers?.length > 0 && (
         <div className="space-y-1.5 pt-1 border-t border-slate-100">
-          <span className="text-[10px] font-black text-slate-500">الموردون المقترحون بناءً على الاسم أو السجل:</span>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          <span className="text-[10px] font-black text-slate-500 block">الموردون المقترحون بناءً على الاسم أو السجل:</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
             {supplierDecision.suggestedSuppliers.map((s) => {
               const isMatched = supplierDecision.matchedSupplierId === s.id;
               return (
@@ -239,7 +304,7 @@ export const SmartImportSupplierResolution: React.FC<SmartImportSupplierResoluti
       {isSearching && (
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
           <div className="relative">
-            <Search size={14} className="absolute inset-y-0 right-3 my-auto text-slate-400" />
+            <Search size={14} className="absolute inset-y-0 right-3 my-auto text-slate-400 pointer-events-none" />
             <input
               id="input-search-supplier-term"
               type="text"

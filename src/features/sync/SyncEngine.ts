@@ -4,6 +4,7 @@
 // ==========================================
 
 import { db, getCurrentUserSession } from "@/core/db";
+import { TokenProvider } from "@/services/auth/tokenProvider";
 import { rtdb } from "@/services/firebase";
 import { ref, serverTimestamp, set } from "firebase/database";
 import { SYNC_PROTOCOL_VERSION } from "./sync.types";
@@ -207,7 +208,7 @@ export class SyncEngine {
       });
 
       // 1. Send via HTTPS sync API endpoint
-      const token = localStorage.getItem("pharmaflow_token") || "local-admin-token";
+      const token = TokenProvider.getAccessToken() || "local-admin-token";
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 20000);
 

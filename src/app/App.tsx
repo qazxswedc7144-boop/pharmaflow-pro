@@ -37,6 +37,7 @@ import {
   TrialBlockedModal
 } from '@features/saas/components/SubscriptionWidgets';
 import { SubscriptionStatusProvider } from '@/services/saas/subscriptionStatusProvider';
+import { TokenProvider } from '@/services/auth/tokenProvider';
 import { 
   SubscriptionEntitlementService,
   shouldShowSubscriptionOnboarding 
@@ -141,7 +142,6 @@ const TermsOfService = lazyWithRetry(() => import('@features/legal/pages/TermsOf
 const SecurityAuditDashboard = lazyWithRetry(() => import('@features/settings/components/SecurityAuditDashboard'));
 const BackupManagement = lazyWithRetry(() => import('@features/settings/components/BackupManagement'));
 
-import { useAuthStore } from '@/store/authStore';
 import { useAuth } from '@features/auth/hooks/useAuth';
 import LoginPage from '@features/auth/pages/LoginPage';
 import ProtectedRoute from '@/components/shared/ProtectedRoute';
@@ -280,30 +280,26 @@ function MainLayout() {
             tenant_id: "local-tenant-01",
             Is_Active: true
           };
-          localStorage.setItem('pharmaflow_user', JSON.stringify(BYPASS_USER));
-          localStorage.setItem('pharmaflow_token', 'local-admin-token');
-          localStorage.setItem('pharmaflow_refresh_token', 'local-admin-refresh-token');
           
-          useAuthStore.getState().login(BYPASS_USER, 'local-admin-token');
+          TokenProvider.setSession(BYPASS_USER, 'local-admin-token', 'local-admin-refresh-token');
           
           const currentHash = window.location.hash;
           if (currentHash === '#/login' || !currentHash) {
             window.location.hash = '#/dashboard';
           }
         } else {
-          // 3. IF TRUE: Evaluate the validity of the current JWT session storage / secure HTTP headers
-          const token = localStorage.getItem('pharmaflow_token');
-          const storedUserStr = localStorage.getItem('pharmaflow_user');
+          // 3. IF TRUE: Evaluate the validity of the current JWT session storage / TokenProvider state
+          const token = TokenProvider.getAccessToken();
+          const session = TokenProvider.getCurrentSession();
           
           let isTokenValid = false;
-          if (token && storedUserStr && token !== 'local-admin-token') {
+          if (token && session.user && token !== 'local-admin-token') {
             try {
               const parts = token.split('.');
               if (parts.length === 3) {
                 const tokenPart = parts[1];
                 if (tokenPart) {
                   const payload = JSON.parse(atob(tokenPart));
-                  // Evaluate validity and check if current JWT token is before expiration
                   const exp = payload.exp * 1000;
                   if (Date.now() < exp) {
                     isTokenValid = true;
@@ -321,13 +317,21 @@ function MainLayout() {
             if (currentHash === '#/login' || !currentHash) {
               window.location.hash = '#/dashboard';
             }
+          } else if (session.refreshToken && typeof navigator !== 'undefined' && navigator.onLine) {
+            // Attempt single-flight session restoration via refresh token
+            try {
+              await TokenProvider.refreshAccessToken();
+              const currentHash = window.location.hash;
+              if (currentHash === '#/login' || !currentHash) {
+                window.location.hash = '#/dashboard';
+              }
+            } catch {
+              TokenProvider.clearSession();
+              window.location.hash = '#/login';
+            }
           } else {
             // Invalid or expired: push to LoginScreen
-            localStorage.removeItem('pharmaflow_token');
-            localStorage.removeItem('pharmaflow_refresh_token');
-            localStorage.removeItem('pharmaflow_user');
-            useAuthStore.getState().logout();
-            
+            TokenProvider.clearSession();
             window.location.hash = '#/login';
           }
         }

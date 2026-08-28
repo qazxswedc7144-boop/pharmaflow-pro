@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, X, RefreshCw } from 'lucide-react';
 import { PermissionDefinition, RoleItem } from '../types';
 import { useAuthStore } from '../../../store/authStore';
+import { resolveCanonicalPermission } from '@/utils/permissions';
 
 export const PermissionMatrix: React.FC = () => {
   const { tenantId } = useAuthStore();
@@ -57,7 +58,8 @@ export const PermissionMatrix: React.FC = () => {
 
   const hasPermission = (role: RoleItem, permKey: string): boolean => {
     if (role.permissions.includes('*')) return true;
-    return role.permissions.includes(permKey);
+    const canonical = resolveCanonicalPermission(permKey);
+    return role.permissions.includes(permKey) || role.permissions.includes(canonical) || role.permissions.some(p => resolveCanonicalPermission(p) === canonical);
   };
 
   return (

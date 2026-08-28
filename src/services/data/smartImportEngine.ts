@@ -314,8 +314,8 @@ export async function processInvoice(file: File | string): Promise<ParsedInvoice
     if (excelItems && excelItems.length > 0) {
       data = {
         type: 'cash',
-        supplier: 'مورد الفاتورة (مستخرج من ملف الاكسل)',
-        invoice_number: `EXCEL-${Math.floor(Math.random() * 90000 + 10000)}`,
+        supplier: '',
+        invoice_number: '',
         date: new Date().toISOString().split('T')[0],
         notes: '[استيراد مباشر من ملف اكسل/CSV]',
         items: excelItems,

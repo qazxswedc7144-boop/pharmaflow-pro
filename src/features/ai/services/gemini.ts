@@ -1,27 +1,11 @@
 // src/modules/ai/services/gemini.ts
-import { useAuthStore } from "@/store/authStore";
+import { TokenProvider } from "@/services/auth/tokenProvider";
 
 /**
  * Retrieves the currently active JWT token of the authenticated user session.
  */
 function getToken(): string {
-  const storeToken = useAuthStore.getState().token;
-  if (storeToken) return storeToken;
-
-  // Safe fallback to persist storage
-  try {
-    const raw = localStorage.getItem("pharma-auth-storage");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed?.state?.token) {
-        return parsed.state.token;
-      }
-    }
-  } catch (e) {}
-
-  return localStorage.getItem("pharmaflow_token") || 
-         localStorage.getItem("token") || 
-         "";
+  return TokenProvider.getAccessToken() || "";
 }
 
 /**

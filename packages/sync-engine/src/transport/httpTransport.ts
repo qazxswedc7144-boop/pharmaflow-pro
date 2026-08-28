@@ -1,4 +1,5 @@
 // packages/sync-engine/src/transport/httpTransport.ts
+import { TokenProvider } from "../../../../src/services/auth/tokenProvider";
 
 export interface RequestConfig extends RequestInit {
   timeoutMs?: number;
@@ -11,11 +12,16 @@ export class HttpTransport {
   private static clientVersion = "1.0.0-phase3";
 
   /**
-   * Helper to fetch authenticated token from local cookie or localStorage
+   * Helper to fetch authenticated headers via Central Token Provider
    */
-  private static getAuthToken(): string | null {
-    if (typeof localStorage === "undefined") return null;
-    return localStorage.getItem("accessToken") || null;
+  private static getAuthHeaders(): Record<string, string> {
+    try {
+      return TokenProvider.getAuthHeaders() as Record<string, string>;
+    } catch {
+      if (typeof localStorage === "undefined") return {};
+      const token = localStorage.getItem("pharmaflow_token") || localStorage.getItem("accessToken");
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
   }
 
   /**
@@ -34,21 +40,17 @@ export class HttpTransport {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
 
-    // Merge standard enterprise headers
+    // Merge standard enterprise headers via Central Token Provider
     const reqHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "x-client-version": this.clientVersion,
       "x-device-id": deviceId,
+      ...this.getAuthHeaders(),
       ...Object.fromEntries(Object.entries(headers)) as Record<string, string>
     };
 
     if (idempotencyKey) {
       reqHeaders["x-idempotency-key"] = idempotencyKey;
-    }
-
-    const token = this.getAuthToken();
-    if (token) {
-      reqHeaders["Authorization"] = `Bearer ${token}`;
     }
 
     let attempt = 0;

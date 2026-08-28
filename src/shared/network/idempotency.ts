@@ -1,5 +1,6 @@
 // src/shared/network/idempotency.ts
 import axios, { InternalAxiosRequestConfig } from "axios";
+import { TokenProvider } from "@/services/auth/tokenProvider";
 
 /**
  * Generates an RFC4122 compliant UUID v4 string.
@@ -28,8 +29,8 @@ export const financialApiClient = axios.create({
 });
 
 /**
- * Request Interceptor: Ensures any state-mutating requests (POST, PUT, DELETE) 
- * targeting critical paths automatically carries a unique Idempotency-Key.
+ * Request Interceptor: Ensures state-mutating requests carry Idempotency-Key 
+ * and auto-injects auth headers via Central Token Provider.
  */
 financialApiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -38,7 +39,6 @@ financialApiClient.interceptors.request.use(
     );
 
     if (isMutating) {
-      // Check if an idempotency key was already set manually
       const existingKey = config.headers.get("Idempotency-Key") || config.headers["Idempotency-Key"];
       
       if (!existingKey) {
@@ -47,12 +47,16 @@ financialApiClient.interceptors.request.use(
       }
     }
     
-    // Auto-inject JWT token if present in localStorage to maintain authentication
-    if (typeof localStorage !== "undefined") {
-      const token = localStorage.getItem("pharmaflow_token");
-      if (token && !config.headers.Authorization) {
-        config.headers.set("Authorization", `Bearer ${token}`);
-      }
+    // Auto-inject auth headers via Central Token Provider
+    const authHeaders = TokenProvider.getAuthHeaders();
+    if (authHeaders.Authorization && !config.headers.Authorization) {
+      config.headers.set("Authorization", authHeaders.Authorization);
+    }
+    if (authHeaders['x-tenant-id'] && !config.headers.get('x-tenant-id')) {
+      config.headers.set('x-tenant-id', authHeaders['x-tenant-id']);
+    }
+    if (authHeaders['x-branch-id'] && !config.headers.get('x-branch-id')) {
+      config.headers.set('x-branch-id', authHeaders['x-branch-id']);
     }
 
     return config;
@@ -61,3 +65,27 @@ financialApiClient.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
+/**
+ * Response Interceptor: Single-flight token refresh retry handler for 401 responses.
+ */
+financialApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
+      try {
+        const newAccessToken = await TokenProvider.refreshAccessToken();
+        if (newAccessToken && originalRequest.headers) {
+          originalRequest.headers.set('Authorization', `Bearer ${newAccessToken}`);
+          return financialApiClient(originalRequest);
+        }
+      } catch (refreshErr) {
+        return Promise.reject(refreshErr);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+

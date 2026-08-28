@@ -141,6 +141,8 @@ export interface ProductDecision {
   userDecision?: ResolutionDecision;
   conflictSource?: ConflictSource;
   conflictType?: ConflictType;
+  sourceProvenance?: 'OCR' | 'AI' | 'LOCAL_PARSER' | 'DATABASE_MATCH' | 'USER' | 'FALLBACK';
+  evidence?: string;
 }
 
 export interface BatchProcessingSummary {
@@ -155,6 +157,8 @@ export interface BatchProcessingSummary {
   detectedSupplier?: string;
   detectedInvoiceNumber?: string;
   detectedDate?: string;
+  invoiceNumberSource?: 'OCR' | 'AI' | 'USER' | 'UNKNOWN';
+  invoiceNumberConfidence?: number;
 }
 
 export interface BatchProcessingSession {

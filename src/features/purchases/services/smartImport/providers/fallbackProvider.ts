@@ -39,6 +39,9 @@ export class FallbackProvider implements IDocumentExtractionProvider {
     const localResult = await parseInvoiceLocally(file);
     const executionTimeMs = Date.now() - startTime;
 
+    const hasRealItems = (localResult.items || []).length > 0;
+    const fallbackConfidence = hasRealItems ? 0.60 : 0.10;
+
     const rawRows: CanonicalImportRawRow[] = (localResult.items || []).map((item, idx) => ({
       sourceRowIndex: idx + 1,
       cells: {
@@ -60,7 +63,7 @@ export class FallbackProvider implements IDocumentExtractionProvider {
       name: 'Fallback_Items',
       headers: ['اسم الصنف', 'الكمية', 'سعر الوحدة', 'الإجمالي'],
       rows: rawRows,
-      confidence: 0.60,
+      confidence: fallbackConfidence,
       isPrimaryInvoiceTable: true
     };
 
@@ -73,12 +76,12 @@ export class FallbackProvider implements IDocumentExtractionProvider {
       metadata: {
         extractionMethod: 'OCR',
         extractedAt: new Date().toISOString(),
-        parserVersion: '2.5.0',
-        confidence: 0.60
+        parserVersion: '3.0.0',
+        confidence: fallbackConfidence
       },
       documentFields: {
-        supplierName: localResult.supplier,
-        invoiceNumber: localResult.invoice_number,
+        supplierName: localResult.supplier || undefined,
+        invoiceNumber: localResult.invoice_number || undefined,
         invoiceDate: localResult.date,
         notes: localResult.notes
       },
@@ -86,7 +89,9 @@ export class FallbackProvider implements IDocumentExtractionProvider {
       warnings: [
         {
           code: 'FALLBACK_ENGINE_ACTIVE',
-          message: 'تم تشغيل المحرك الاحتياطي المحلي بسبب تعذر الاتصال بالخادم. يرجى مراجعة وتدقيق البنود بعناية.',
+          message: hasRealItems 
+            ? 'تم استخراج البيانات عبر المحرك المحلي الآمن. يرجى مراجعة وتدقيق البنود بعناية.'
+            : 'تعذر الاستخراج الآلي للمحتوى. لم يتم توليد أي بيانات وهمية، يرجى إدخال الأصناف يدوياً.',
           severity: 'WARNING'
         }
       ],
@@ -100,9 +105,9 @@ export class FallbackProvider implements IDocumentExtractionProvider {
       executionTimeMs,
       rawText: localResult.notes,
       diagnostics: [],
-      confidence: 0.60,
+      confidence: fallbackConfidence,
       isFallbackUsed: true,
-      fallbackReason: 'تعذر المعالجة عبر المحركات الرئيسية؛ تم تفعيل المحرك الاحتياطي'
+      fallbackReason: 'تعذر المعالجة عبر المحركات الرئيسية؛ تم تفعيل الاستخراج المحلي الآمن (بدون اختلاق بيانات)'
     };
   }
 }

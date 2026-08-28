@@ -23,6 +23,14 @@ export type ExtractionMethod =
   | 'OCR' 
   | 'AI_DOCUMENT';
 
+export type ExtractedItemSource = 
+  | 'OCR' 
+  | 'AI' 
+  | 'LOCAL_PARSER' 
+  | 'DATABASE_MATCH' 
+  | 'USER' 
+  | 'FALLBACK';
+
 export interface CanonicalImportRawRow {
   sourceRowIndex: number;
   cells: Record<string, unknown>;
@@ -192,6 +200,7 @@ export interface ExtractedImportRow {
   fieldConfidence?: Record<string, { score: number; level: string; reasons: string[] }>;
   isHealed?: boolean;
   healingExplanations?: string[];
+  sourceProvenance?: ExtractedItemSource;
 }
 
 export interface ImportSummary {

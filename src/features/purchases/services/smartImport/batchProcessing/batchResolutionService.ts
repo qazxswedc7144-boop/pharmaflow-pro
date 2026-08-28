@@ -314,7 +314,7 @@ export class BatchResolutionService {
     }
 
     const executionTimeMs = Date.now() - startTime;
-    const appliedInvoiceNumber: string = session.summary.detectedInvoiceNumber || `INV-IMP-${Date.now()}`;
+    const appliedInvoiceNumber: string = session.summary.detectedInvoiceNumber || '';
     const appliedDate: string = session.summary.detectedDate || new Date().toISOString().slice(0, 10);
 
     const resolutionResult: CanonicalResolutionResult = {

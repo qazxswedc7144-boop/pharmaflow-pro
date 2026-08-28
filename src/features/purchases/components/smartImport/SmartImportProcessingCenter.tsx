@@ -1,7 +1,7 @@
 // src/features/purchases/components/smartImport/SmartImportProcessingCenter.tsx
 /**
  * PharmaFlow PRO ERP — Sovereign Enterprise Edition
- * Phase 2.4: Unified Smart Import Review & Human Resolution UX
+ * Mobile-First Enterprise Review Center — Unified Smart Import Review & Human Resolution UX
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -68,6 +68,10 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
   const [isApplying, setIsApplying] = useState(false);
   const [validationErrorMsg, setValidationErrorMsg] = useState<string | null>(null);
 
+  // Manual overrides for invoice metadata
+  const [customInvoiceNumber, setCustomInvoiceNumber] = useState<string>('');
+  const [customInvoiceDate, setCustomInvoiceDate] = useState<string>('');
+
   const addToast = useUIStore(state => state.addToast);
 
   // Initialize batch session whenever analysisResult is ready
@@ -83,6 +87,8 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
           setSession(newSession);
           setSelectedRowIds(new Set());
           setValidationErrorMsg(null);
+          setCustomInvoiceNumber(newSession.summary.detectedInvoiceNumber || '');
+          setCustomInvoiceDate(newSession.summary.detectedDate || '');
         }
       }).catch(err => {
         console.error('[SmartImportProcessingCenter] Session init error:', err);
@@ -231,8 +237,8 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
       }));
 
       const finalSupplierName = canonicalResult.appliedSupplierName || session.summary.detectedSupplier;
-      const finalInvoiceNumber = canonicalResult.appliedInvoiceNumber || session.summary.detectedInvoiceNumber;
-      const finalDate = canonicalResult.appliedDate || session.summary.detectedDate;
+      const finalInvoiceNumber = customInvoiceNumber || canonicalResult.appliedInvoiceNumber || session.summary.detectedInvoiceNumber;
+      const finalDate = customInvoiceDate || canonicalResult.appliedDate || session.summary.detectedDate;
 
       if (saveImmediately && onApplyAndSaveImmediately) {
         onApplyAndSaveImmediately(approvedRows, finalSupplierName, finalInvoiceNumber, finalDate, canonicalResult);
@@ -260,11 +266,11 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
 
   const getSourceIcon = (type?: string) => {
     switch (type) {
-      case 'EXCEL': return <FileSpreadsheet className="text-emerald-600" size={16} />;
-      case 'CSV': return <FileText className="text-blue-600" size={16} />;
-      case 'PDF': return <FileText className="text-red-600" size={16} />;
-      case 'CAMERA': return <Camera className="text-amber-600" size={16} />;
-      default: return <ImageIcon className="text-purple-600" size={16} />;
+      case 'EXCEL': return <FileSpreadsheet className="text-emerald-600" size={14} />;
+      case 'CSV': return <FileText className="text-blue-600" size={14} />;
+      case 'PDF': return <FileText className="text-red-600" size={14} />;
+      case 'CAMERA': return <Camera className="text-amber-600" size={14} />;
+      default: return <ImageIcon className="text-purple-600" size={14} />;
     }
   };
 
@@ -273,46 +279,39 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
       isOpen={isOpen}
       onClose={handleCancel}
       title=""
-      maxWidth="max-w-[880px] w-[95vw]"
+      maxWidth="max-w-[880px] w-full sm:w-[95vw]"
       noPadding={true}
       centerOnMobile={true}
       showCloseButton={false}
     >
-      <div dir="rtl" className="flex flex-col max-h-[90vh] bg-white rounded-3xl overflow-hidden font-cairo select-none max-w-full">
+      <div 
+        dir="rtl" 
+        className="flex flex-col h-[96dvh] sm:h-[90vh] max-h-[96dvh] bg-white rounded-2xl sm:rounded-3xl overflow-hidden font-cairo select-none max-w-full"
+      >
         
-        {/* HEADER BAR */}
-        <div className="bg-[#1E4D4D] text-white px-4 py-3 flex items-center justify-between shadow-sm shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-emerald-300">
-              <Sparkles size={18} />
+        {/* COMPACT FIXED HEADER */}
+        <div className="bg-[#1E4D4D] text-white px-3.5 py-2.5 flex items-center justify-between shadow-xs shrink-0 pt-safe">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-emerald-300 shrink-0">
+              <Sparkles size={16} />
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm font-black tracking-wide">مركز المراجعة والقرارات للاستيراد الذكي</h2>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h2 className="text-xs sm:text-sm font-black tracking-wide">مركز مراجعة الاستيراد</h2>
                 {analysisResult && (
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200 text-[10px] font-bold border border-emerald-400/30 flex items-center gap-1">
+                  <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-200 text-[10px] font-bold rounded flex items-center gap-1">
                     {getSourceIcon(analysisResult.sourceType)}
                     {analysisResult.sourceType}
                   </span>
                 )}
                 {analysisResult?.metadata.providerName && (
-                  <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-100 text-[10px] font-bold border border-teal-400/30 flex items-center gap-1">
+                  <span className="px-1.5 py-0.2 bg-teal-500/20 text-teal-100 text-[10px] font-bold rounded">
                     ⚡ {analysisResult.metadata.providerName}
                   </span>
                 )}
-                {analysisResult?.metadata.isWorkerUsed && (
-                  <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-200 text-[10px] font-bold border border-cyan-400/30">
-                    ⚡ معالجة مجمعة فائقة
-                  </span>
-                )}
-                {analysisResult?.metadata.isCached && (
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200 text-[10px] font-bold border border-amber-400/30">
-                    💾 ذاكرة مؤقتة
-                  </span>
-                )}
               </div>
-              <p className="text-[10px] text-emerald-100/80 font-medium truncate max-w-[280px] sm:max-w-md">
-                {analysisResult?.fileName || 'مركز مراجعة موحد للأصناف والمورد وأمان الجرعات الدوائية'}
+              <p className="text-[10px] text-emerald-100/80 font-medium truncate max-w-[260px] sm:max-w-md">
+                راجع البيانات المستخرجة واتخذ القرار قبل إضافة الأصناف إلى الفاتورة
               </p>
             </div>
           </div>
@@ -320,31 +319,31 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
           <button 
             id="btn-close-processing-center"
             onClick={handleCancel}
-            className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95"
+            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95 shrink-0"
             title="إغلاق"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
         {/* LOADING STATE */}
         {isLoading && (
           <div className="p-8 flex flex-col items-center justify-center space-y-4 my-auto">
-            <div className="relative w-16 h-16">
+            <div className="relative w-14 h-14">
               <div className="absolute inset-0 rounded-full border-4 border-emerald-100 animate-ping opacity-30" />
-              <div className="w-16 h-16 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin flex items-center justify-center">
-                <Sparkles className="text-emerald-600 animate-pulse" size={24} />
+              <div className="w-14 h-14 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin flex items-center justify-center">
+                <Sparkles className="text-emerald-600 animate-pulse" size={20} />
               </div>
             </div>
             
-            <div className="text-center space-y-1.5 max-w-sm">
-              <h3 className="text-sm font-black text-[#1E4D4D]">{progressMessage}</h3>
-              <p className="text-[11px] font-bold text-slate-400">
-                جاري مطابقة المورد والأصناف وفحص الأمان الصيدلاني...
+            <div className="text-center space-y-1 max-w-sm">
+              <h3 className="text-xs sm:text-sm font-black text-[#1E4D4D]">{progressMessage}</h3>
+              <p className="text-[10px] sm:text-[11px] font-bold text-slate-400">
+                جاري فحص سلامة المستند، مطابقة الأصناف والمورد...
               </p>
             </div>
 
-            <div className="w-full max-w-xs bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="w-full max-w-xs bg-slate-100 rounded-full h-1.5 overflow-hidden">
               <div 
                 className="bg-emerald-600 h-full rounded-full transition-all duration-300"
                 style={{ width: `${Math.min(100, Math.max(15, progressPercent))}%` }}
@@ -355,7 +354,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
               id="btn-abort-smart-import"
               type="button"
               onClick={handleCancel}
-              className="mt-3 px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all active:scale-95"
+              className="mt-2 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all active:scale-95"
             >
               إلغاء المعالجة
             </button>
@@ -367,12 +366,16 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             
             {/* Scrollable Container for Top Panels */}
-            <div className="p-3 space-y-2.5 overflow-y-auto shrink-0 max-h-[38vh] border-b border-slate-100 bg-slate-50/50">
-              {/* Supplier Resolution Panel */}
+            <div className="p-2.5 sm:p-3 space-y-2.5 overflow-y-auto shrink-0 max-h-[40vh] border-b border-slate-100 bg-slate-50/50">
+              {/* Invoice Data & Supplier Resolution Panel */}
               <SmartImportSupplierResolution
                 supplierDecision={session.supplierDecision}
                 availableSuppliers={availableSuppliers}
                 onChange={handleUpdateSupplier}
+                detectedInvoiceNumber={customInvoiceNumber || session.summary.detectedInvoiceNumber}
+                detectedDate={customInvoiceDate || session.summary.detectedDate}
+                onUpdateInvoiceNumber={setCustomInvoiceNumber}
+                onUpdateInvoiceDate={setCustomInvoiceDate}
               />
 
               {/* Batch Summary & Filter Tabs */}
@@ -405,14 +408,14 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
 
             {/* Validation Error Alert if any */}
             {validationErrorMsg && (
-              <div className="mx-3 mt-2 p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs font-bold text-red-800 flex items-center gap-2">
-                <AlertTriangle size={16} className="text-red-600 shrink-0" />
+              <div className="mx-2.5 mt-2 p-2 bg-red-50 border border-red-200 rounded-xl text-xs font-bold text-red-800 flex items-center gap-2">
+                <AlertTriangle size={14} className="text-red-600 shrink-0" />
                 <span>{validationErrorMsg}</span>
               </div>
             )}
 
-            {/* Products Resolution Table/Cards List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
+            {/* Products Resolution Cards List */}
+            <div className="flex-1 overflow-y-auto p-2.5 sm:p-3 space-y-2 min-h-0">
               <SmartImportProductResolution
                 productDecisions={displayedProductDecisions}
                 selectedRowIds={selectedRowIds}
@@ -422,19 +425,19 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
               />
             </div>
 
-            {/* FOOTER ACTIONS */}
-            <div className="p-3 bg-white border-t border-slate-200 flex flex-col sm:flex-row gap-2 shrink-0">
+            {/* FIXED FOOTER ACTIONS (Mobile Safe Bottom) */}
+            <div className="p-2.5 sm:p-3 bg-white border-t border-slate-200 flex flex-col sm:flex-row gap-2 shrink-0 pb-safe">
               <button 
                 id="btn-apply-import-invoice"
                 type="button"
                 disabled={isApplying}
                 onClick={() => handleExecuteApply(false)}
-                className="flex-[2] h-11 bg-[#1E4D4D] hover:bg-[#163a3a] text-white rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all disabled:opacity-50"
+                className="flex-[2] min-h-[42px] h-11 bg-[#1E4D4D] hover:bg-[#163a3a] text-white rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all disabled:opacity-50"
               >
                 {isApplying ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <Edit3 size={16} />
+                  <Edit3 size={15} />
                 )}
                 <span>
                   اعتماد القرارات وتعبئة الفاتورة ({session.summary.totalRows - session.summary.skippedCount} صنف)
@@ -447,12 +450,12 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
                   type="button"
                   disabled={isApplying}
                   onClick={() => handleExecuteApply(true)}
-                  className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all disabled:opacity-50"
+                  className="flex-1 min-h-[42px] h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all disabled:opacity-50"
                 >
                   {isApplying ? (
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
-                    <CheckCircle2 size={16} />
+                    <CheckCircle2 size={15} />
                   )}
                   <span>حفظ فوري وترحيل 💾</span>
                 </button>
@@ -463,7 +466,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
                 type="button"
                 onClick={handleCancel}
                 disabled={isApplying}
-                className="h-11 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-black text-xs active:scale-95 transition-all disabled:opacity-50"
+                className="min-h-[42px] h-11 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-black text-xs active:scale-95 transition-all disabled:opacity-50"
               >
                 إلغاء
               </button>

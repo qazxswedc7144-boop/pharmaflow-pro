@@ -9,6 +9,7 @@ import { SYNC_CONFIG } from './sync.constants';
 import { PharmaFlowDexieExtension } from './sync.queue';
 import { getSyncActions } from './sync.events';
 import { getCurrentUserSession } from '@/core/db';
+import { TokenProvider } from '@/services/auth/tokenProvider';
 import { SyncLockManager } from './sync.lock';
 import { DeviceManager } from './device.manager';
 
@@ -80,7 +81,7 @@ export class DistributedSyncEngine {
     try {
       const session = getCurrentUserSession();
       const device = DeviceManager.getDeviceIdentity();
-      const token = localStorage.getItem("pharmaflow_token") || "local-admin-token";
+      const token = TokenProvider.getAccessToken() || "local-admin-token";
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 20000);
@@ -258,7 +259,7 @@ export class DistributedSyncEngine {
     try {
       const session = getCurrentUserSession();
       const device = DeviceManager.getDeviceIdentity();
-      const token = localStorage.getItem("pharmaflow_token") || "local-admin-token";
+      const token = TokenProvider.getAccessToken() || "local-admin-token";
 
       await (this.db as any).outbox.update(event.id, { status: 'SENDING', updatedAt: new Date().toISOString() });
       
@@ -322,7 +323,7 @@ export class DistributedSyncEngine {
     let delay: number = SYNC_CONFIG.BACKOFF_INITIAL_DELAY_MS;
     const session = getCurrentUserSession();
     const device = DeviceManager.getDeviceIdentity();
-    const token = localStorage.getItem("pharmaflow_token") || "local-admin-token";
+    const token = TokenProvider.getAccessToken() || "local-admin-token";
     
     while (mutation.retryCount <= SYNC_CONFIG.MAX_RETRY_ATTEMPTS) {
       try {

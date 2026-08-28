@@ -366,6 +366,8 @@ export class BatchSessionService {
             resolutionCategory: 'PRODUCT',
             conflictType: isSafetyConflict ? 'DOSAGE_SAFETY_CONFLICT' : undefined,
             conflictSource: isSafetyConflict ? 'IMPORT' : undefined,
+            sourceProvenance: row.sourceProvenance || 'OCR',
+            evidence: (row as any).evidence || row.notes,
             newProductData: {
               name: rawName,
               barcode: barcode || undefined,
@@ -409,7 +411,9 @@ export class BatchSessionService {
         validationIssues: [],
         extractedInfo,
         resolutionStatus: 'PENDING_REVIEW',
-        resolutionCategory: 'PRODUCT'
+        resolutionCategory: 'PRODUCT',
+        sourceProvenance: row.sourceProvenance || 'OCR',
+        evidence: (row as any).evidence || row.notes
       };
     });
   }
@@ -473,7 +477,9 @@ export class BatchSessionService {
       totalAmount: Math.round(totalAmount * 100) / 100,
       detectedSupplier: meta?.detectedSupplier,
       detectedInvoiceNumber: meta?.detectedInvoiceNumber,
-      detectedDate: meta?.detectedDate
+      detectedDate: meta?.detectedDate,
+      invoiceNumberSource: (meta as any)?.invoiceNumberSource || (meta?.detectedInvoiceNumber ? 'OCR' : 'UNKNOWN'),
+      invoiceNumberConfidence: meta?.detectedInvoiceNumber ? 0.95 : 0
     };
   }
 
@@ -510,6 +516,7 @@ export class BatchSessionService {
         const merged: ProductDecision = {
           ...p,
           ...update,
+          sourceProvenance: update.sourceProvenance || 'USER',
           suggestedProducts: update.suggestedProducts || p.suggestedProducts || []
         };
         // Recalculate line total if price or quantity changed

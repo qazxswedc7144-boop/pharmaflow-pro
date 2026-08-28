@@ -69,6 +69,11 @@ interface InternalCacheEntry extends CachedExtractionDocument {
  */
 export class ExtractionCacheService {
   /**
+   * Pipeline version tag to prevent stale/mock cache collisions
+   */
+  private static readonly PIPELINE_VERSION = 'v3.0.0-Sovereign-Clean';
+
+  /**
    * Maximum number of cached documents.
    */
   private static readonly MAX_ENTRIES = 50;
@@ -143,7 +148,7 @@ export class ExtractionCacheService {
    * Saves a successful extraction result into the cache.
    *
    * Cache is isolated by:
-   * tenantId + branchId + document fingerprint
+   * tenantId + branchId + document fingerprint + pipelineVersion
    */
   public static async saveCachedDocument(
     file: File | string,
@@ -151,6 +156,13 @@ export class ExtractionCacheService {
     options: ExtractionCacheSaveOptions
   ): Promise<void> {
     try {
+      // Do not cache documents with zero items or extremely low confidence
+      const primaryTable = document.tables.find(t => t.isPrimaryInvoiceTable) || document.tables[0];
+      const rowCount = primaryTable?.rows?.length || 0;
+      if (rowCount === 0 && (!document.documentFields.invoiceNumber && !document.documentFields.supplierName)) {
+        return;
+      }
+
       const cacheKey = await this.createCacheKey(
         file,
         options.tenantId,
@@ -282,7 +294,7 @@ export class ExtractionCacheService {
   /**
    * Creates a tenant-scoped and branch-scoped cache key.
    */
-  private static async createCacheKey(
+  public static async createCacheKey(
     file: File | string,
     tenantId?: string,
     branchId?: string
@@ -291,13 +303,13 @@ export class ExtractionCacheService {
     const t = this.normalizeScope(tenantId);
     const b = this.normalizeScope(branchId);
 
-    return `tenant:${t}|branch:${b}|document:${fingerprint}`;
+    return `tenant:${t}|branch:${b}|v:${this.PIPELINE_VERSION}|document:${fingerprint}`;
   }
 
   /**
    * Creates a stable document fingerprint.
    */
-  private static async createDocumentFingerprint(
+  public static async createDocumentFingerprint(
     file: File | string
   ): Promise<string> {
     if (typeof file === 'string') {

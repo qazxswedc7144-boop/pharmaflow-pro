@@ -5,6 +5,7 @@
 
 import { DeviceMetadata, SYNC_PROTOCOL_VERSION } from "./sync.types";
 import { getCurrentUserSession } from "@/core/db";
+import { TokenProvider } from "@/services/auth/tokenProvider";
 
 const DEVICE_STORAGE_KEY = "pharmaflow_device_identity";
 
@@ -79,7 +80,7 @@ export class DeviceManager {
 
     const identity = this.getDeviceIdentity();
     const session = getCurrentUserSession();
-    const token = localStorage.getItem("pharmaflow_token") || "local-admin-token";
+    const token = TokenProvider.getAccessToken() || "local-admin-token";
 
     try {
       const controller = new AbortController();

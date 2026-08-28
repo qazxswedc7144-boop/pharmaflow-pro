@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
-import { financialApiClient } from '@/shared/network/idempotency';
+import { TokenProvider } from '@/services/auth/tokenProvider';
 import { db } from '@/core/db';
 
 import { User } from '@/types/auth.types';
@@ -42,49 +42,43 @@ const BYPASS_USER: User = {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authenticationEnabled, setAuthenticationEnabledState] = useState<boolean>(() => {
-    const stored = localStorage.getItem('pharmaflow_auth_enabled');
-    return stored === 'true'; // Defaults to false
+    return TokenProvider.isAuthEnabled();
   });
 
   const [user, setUser] = useState<User | null>(() => {
-    const authEnabled = localStorage.getItem('pharmaflow_auth_enabled') === 'true';
-    if (!authEnabled) {
+    if (!TokenProvider.isAuthEnabled()) {
       return BYPASS_USER;
     }
-    try {
-      const stored = localStorage.getItem('pharmaflow_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
+    return useAuthStore.getState().user || TokenProvider.getCurrentSession().user;
   });
 
   const [accessToken, setAccessToken] = useState<string | null>(() => {
-    const authEnabled = localStorage.getItem('pharmaflow_auth_enabled') === 'true';
-    if (!authEnabled) {
+    if (!TokenProvider.isAuthEnabled()) {
       return 'local-admin-token';
     }
-    return localStorage.getItem('pharmaflow_token');
+    return TokenProvider.getAccessToken();
   });
 
   const [refreshTokenState, setRefreshTokenState] = useState<string | null>(() => {
-    const authEnabled = localStorage.getItem('pharmaflow_auth_enabled') === 'true';
-    if (!authEnabled) {
+    if (!TokenProvider.isAuthEnabled()) {
       return 'local-admin-refresh-token';
     }
-    return localStorage.getItem('pharmaflow_refresh_token');
+    return TokenProvider.getRefreshToken();
   });
 
   const [loading, setLoading] = useState(false);
 
-  // Synchronize initial local storage session with useAuthStore on mount
+  // Sync state when authStore changes
   useEffect(() => {
-    if (user && accessToken) {
-      useAuthStore.getState().login(user, accessToken);
-    } else {
-      useAuthStore.getState().logout();
-    }
-  }, [user, accessToken]);
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (TokenProvider.isAuthEnabled()) {
+        setUser(state.user);
+        setAccessToken(state.token);
+        setRefreshTokenState(state.refreshToken);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Load and sync authenticationEnabled status from Dexie on mount
   useEffect(() => {
@@ -94,13 +88,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (item !== undefined) {
           const isEnabled = item.value === true;
           setAuthenticationEnabledState(isEnabled);
-          localStorage.setItem('pharmaflow_auth_enabled', isEnabled ? 'true' : 'false');
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('pharmaflow_auth_enabled', isEnabled ? 'true' : 'false');
+          }
           
           if (!isEnabled) {
             setUser(BYPASS_USER);
             setAccessToken('local-admin-token');
             setRefreshTokenState('local-admin-refresh-token');
-            useAuthStore.getState().login(BYPASS_USER, 'local-admin-token');
+            TokenProvider.setSession(BYPASS_USER, 'local-admin-token', 'local-admin-refresh-token');
           }
         }
       } catch (e) {
@@ -111,53 +107,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = useCallback(async () => {
-    if (localStorage.getItem('pharmaflow_auth_enabled') !== 'true') {
-      // No logout allowed/needed in bypass mode
+    if (!TokenProvider.isAuthEnabled()) {
       return;
     }
     setLoading(true);
     try {
-      const currentRefresh = localStorage.getItem('pharmaflow_refresh_token');
-      if (currentRefresh) {
-        await axios.post('/api/auth/logout', { refreshToken: currentRefresh }).catch(() => {});
-      }
-    } catch {
-      // Ignore network errors on logout
+      await TokenProvider.logout();
     } finally {
-      localStorage.removeItem('pharmaflow_token');
-      localStorage.removeItem('pharmaflow_refresh_token');
-      localStorage.removeItem('pharmaflow_user');
-
       setAccessToken(null);
       setRefreshTokenState(null);
       setUser(null);
-
-      useAuthStore.getState().logout();
       setLoading(false);
     }
   }, []);
 
   const refreshToken = useCallback(async (): Promise<string> => {
-    const currentRefresh = localStorage.getItem('pharmaflow_refresh_token');
-    if (!currentRefresh) {
-      await logout();
-      throw new Error('No refresh token available');
-    }
-
     try {
-      const response = await axios.post('/api/auth/refresh', { refreshToken: currentRefresh });
-      const { accessToken: newAccess, refreshToken: newRefresh, user: newUser } = response.data;
-
-      localStorage.setItem('pharmaflow_token', newAccess);
-      localStorage.setItem('pharmaflow_refresh_token', newRefresh);
-      localStorage.setItem('pharmaflow_user', JSON.stringify(newUser));
-
+      const newAccess = await TokenProvider.refreshAccessToken();
+      const session = TokenProvider.getCurrentSession();
       setAccessToken(newAccess);
-      setRefreshTokenState(newRefresh);
-      setUser(newUser);
-
-      useAuthStore.getState().login(newUser, newAccess);
-
+      setRefreshTokenState(session.refreshToken);
+      setUser(session.user);
       return newAccess;
     } catch (err) {
       await logout();
@@ -169,21 +139,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       const response = await axios.post('/api/auth/login', { username, password });
-      const { accessToken: access, refreshToken: refresh, user: authenticatedUser } = response.data;
+      const data = response.data || {};
+      const access = data.accessToken || data.token;
+      const refresh = data.refreshToken || null;
+      const authenticatedUser = data.user || { id: username, username, role: 'CASHIER' };
 
-      localStorage.setItem('pharmaflow_token', access);
-      localStorage.setItem('pharmaflow_refresh_token', refresh);
-      localStorage.setItem('pharmaflow_user', JSON.stringify(authenticatedUser));
+      TokenProvider.setSession(authenticatedUser, access, refresh);
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('pharmaflow_auth_enabled', 'true');
+      }
+      setAuthenticationEnabledState(true);
 
       setAccessToken(access);
       setRefreshTokenState(refresh);
       setUser(authenticatedUser);
-
-      // Force-enable authentication configuration on successful login
-      localStorage.setItem('pharmaflow_auth_enabled', 'true');
-      setAuthenticationEnabledState(true);
-
-      useAuthStore.getState().login(authenticatedUser, access);
 
       return { user: authenticatedUser, accessToken: access };
     } catch (err: any) {
@@ -201,7 +171,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshProfile = useCallback(async () => {}, []);
 
   const setAuthenticationEnabled = useCallback(async (enabled: boolean) => {
-    localStorage.setItem('pharmaflow_auth_enabled', enabled ? 'true' : 'false');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('pharmaflow_auth_enabled', enabled ? 'true' : 'false');
+    }
     setAuthenticationEnabledState(enabled);
     
     try {
@@ -211,63 +183,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!enabled) {
-      // Purge active network tokens
-      localStorage.removeItem('pharmaflow_token');
-      localStorage.removeItem('pharmaflow_refresh_token');
-      localStorage.removeItem('pharmaflow_user');
-      
       setUser(BYPASS_USER);
       setAccessToken('local-admin-token');
       setRefreshTokenState('local-admin-refresh-token');
-      useAuthStore.getState().login(BYPASS_USER, 'local-admin-token');
+      TokenProvider.setSession(BYPASS_USER, 'local-admin-token', 'local-admin-refresh-token');
     } else {
-      // Enable authentication: transition to strictly secure login sequence
-      localStorage.removeItem('pharmaflow_token');
-      localStorage.removeItem('pharmaflow_refresh_token');
-      localStorage.removeItem('pharmaflow_user');
-      
       setUser(null);
       setAccessToken(null);
       setRefreshTokenState(null);
-      useAuthStore.getState().logout();
+      TokenProvider.clearSession();
     }
   }, []);
 
-  // Set up robust response interceptor for token expiration 401 handling
-  useEffect(() => {
-    const interceptor = financialApiClient.interceptors.response.use(
-      (response) => response,
-      async (error) => {
-        const originalRequest = error.config;
-        if (error.response?.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true;
-          try {
-            const freshToken = await refreshToken();
-            if (originalRequest.headers) {
-              originalRequest.headers['Authorization'] = `Bearer ${freshToken}`;
-            }
-            return financialApiClient(originalRequest);
-          } catch (refreshErr) {
-            await logout();
-            return Promise.reject(refreshErr);
-          }
-        }
-        return Promise.reject(error);
-      }
-    );
-
-    return () => {
-      financialApiClient.interceptors.response.eject(interceptor);
-    };
-  }, [refreshToken, logout]);
-
   // Derived profile structure for backward compatibility
   const profile = user ? {
-    id: user.id || '',
-    name: user.User_Name || '',
-    role: user.Role || '',
-    email: user.User_Email || '',
-    tenantId: user.tenant_id || null
+    id: user.id || (user as any).user_id || '',
+    name: user.User_Name || user.fullName || user.username || '',
+    role: user.Role || user.role || '',
+    email: user.User_Email || user.email || '',
+    tenantId: user.tenant_id || user.tenantId || null
   } : null;
 
   return (
@@ -300,4 +234,5 @@ export function useAuth() {
   }
   return context;
 }
+
 
