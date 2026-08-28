@@ -3,6 +3,7 @@ import { testSuite } from '@/services/system/TestSuiteService';
 import { integrityVerifier } from '@/services/integrity/integrityVerifier';
 import { eventBus, EVENTS } from '@/services/eventBus';
 import { Card, Button, Badge } from '@/components/shared/SharedUI';
+import { configurationService } from '@/services/config/configurationService';
 import { 
   ShieldCheck, Activity, AlertCircle, CheckCircle2, RefreshCw, 
   Smartphone, Database, Wifi, Lock, DownloadCloud, UploadCloud, 
@@ -52,10 +53,10 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
 
   // 2️⃣ Device Registration States
   const [deviceUUID] = useState(() => {
-    let existingUUID = localStorage.getItem('erp_device_uuid');
+    let existingUUID = configurationService.getSync<string>('device.uuid');
     if (!existingUUID) {
       existingUUID = 'CAD-' + Array.from({length: 4}, () => Math.random().toString(36).substring(2, 6).toUpperCase()).join('-');
-      localStorage.setItem('erp_device_uuid', existingUUID);
+      configurationService.set('device.uuid', existingUUID);
     }
     return existingUUID;
   });
@@ -225,15 +226,16 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
 
   // Handle unique Device UUID generation & match
   const initDeviceConfigs = useCallback(async () => {
-    let existingUUID = localStorage.getItem('erp_device_uuid');
+    let existingUUID = await configurationService.get<string>('device.uuid');
     if (!existingUUID) {
       existingUUID = deviceUUID;
+      await configurationService.set('device.uuid', existingUUID);
     }
 
-    let storedDeviceName = localStorage.getItem('erp_device_name');
+    let storedDeviceName = await configurationService.get<string>('device.name');
     if (!storedDeviceName) {
       storedDeviceName = 'POS-01';
-      localStorage.setItem('erp_device_name', storedDeviceName);
+      await configurationService.set('device.name', storedDeviceName);
     }
     setDeviceName(storedDeviceName);
 
