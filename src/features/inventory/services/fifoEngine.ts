@@ -224,13 +224,12 @@ export class FIFOEngine {
     const isConsumption = (type === 'SALE' && !isReturn) || (type === 'PURCHASE' && isReturn);
 
     if (isConsumption) {
-      const items = (invAny.items as Array<{ product_id: string; qty: number; cost?: number; price: number }>) || [];
-      const productIds = items.map(itm => itm.product_id).filter(Boolean);
+      const items = (invAny.items as Array<any>) || [];
+      const productIds = items.map(itm => itm.product_id || itm.productId || itm.id).filter(Boolean);
       
-      const layers = await db.inventory_layers
-        .where('item_id')
-        .anyOf(productIds)
-        .toArray();
+      const layers = productIds.length > 0
+        ? await db.inventory_layers.where('item_id').anyOf(productIds).toArray()
+        : [];
 
       const result = await WorkerClient.runFIFO(invoice, layers);
 

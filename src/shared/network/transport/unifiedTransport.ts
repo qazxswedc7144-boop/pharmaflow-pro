@@ -2,6 +2,8 @@
 
 import { TokenProvider } from "@/services/auth/tokenProvider";
 import { generateIdempotencyKey } from "@/shared/network/idempotency";
+import { getActiveCorrelationId } from "@/core/observability/correlation";
+import { observabilityService } from "@/core/observability/observabilityService";
 import {
   Transport,
   RequestConfig,
@@ -135,10 +137,13 @@ export class UnifiedTransport implements Transport {
       if (rawAuth['x-branch-id']) authHeaders['x-branch-id'] = rawAuth['x-branch-id'];
     }
 
+    const correlationId = getActiveCorrelationId();
+
     // Build Request Headers
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Request-ID': requestId,
+      'X-Correlation-ID': correlationId,
       'X-Device-ID': deviceId,
       ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
       ...(branchId ? { 'X-Branch-ID': branchId } : {}),
@@ -275,6 +280,7 @@ export class UnifiedTransport implements Transport {
         if (err.code && typeof err.code === 'string' && err.code.startsWith('NETWORK_')) {
           // Already normalized UnifiedNetworkError
           if (!err.retryable || attempt >= maxRetries) {
+            observabilityService.recordError(err, { feature: 'NETWORK' }, 'NETWORK', 'ERROR').catch(() => {});
             throw err;
           }
         }

@@ -35,6 +35,8 @@ export class StockMovementEngine {
         CostPrice: data.unit_cost || 0,
         cost: data.unit_cost || 0,
         Is_Active: 1,
+        tenantId: 'tenant-default',
+        tenant_id: 'tenant-default',
         created_at: new Date().toISOString()
       };
       try {

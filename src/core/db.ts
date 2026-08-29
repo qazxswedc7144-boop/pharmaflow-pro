@@ -214,6 +214,17 @@ export class PharmaFlowDB extends Dexie {
   // Phase 3.3 - Controlled Inventory Correction & Human Resolution Tables
   inventoryCorrectionCases!: Table<any>;
 
+  // Phase 3.4.6 - Enterprise Observability & Diagnostics Tables
+  system_diagnostics!: Table<any>;
+  error_aggregates!: Table<any>;
+  recovery_events!: Table<any>;
+  system_health!: Table<any>;
+
+  // Phase 3.4.7 - Enterprise Data Integrity & Idempotency Hardening Tables
+  integrity_audit_logs!: Table<any>;
+  integrity_repair_records!: Table<any>;
+  idempotency_records!: Table<any>;
+
   // Legacy support for code that uses db.db
   get db(): PharmaFlowDB { return this; }
 
@@ -401,6 +412,21 @@ export class PharmaFlowDB extends Dexie {
       inventoryCorrectionCases: '&id, caseNumber, tenantId, branchId, productId, discrepancyType, status, createdAt, [tenantId+status], [tenantId+branchId+status], [tenantId+productId], [tenantId+caseNumber]'
     });
 
+    // Version 31: Phase 3.4.6 - Enterprise Observability, Diagnostics & Recovery Schema
+    this.version(31).stores({
+      system_diagnostics: '&id, errorId, correlationId, fingerprint, category, severity, tenantId, timestamp, [tenantId+severity], [tenantId+category]',
+      error_aggregates: '&fingerprint, category, severity, tenantId, count, lastSeenAt, [tenantId+category]',
+      recovery_events: '&id, correlationId, strategy, status, tenantId, timestamp, [tenantId+status]',
+      system_health: '&id, overall, mode, timestamp'
+    });
+
+    // Version 32: Phase 3.4.7 - Enterprise Data Integrity & Idempotency Hardening Schema
+    this.version(32).stores({
+      integrity_audit_logs: '&id, operationId, idempotencyKey, fingerprint, tenantId, branchId, status, startedAt, [tenantId+branchId+status]',
+      integrity_repair_records: '&id, repairId, status, tenantId, branchId, timestamp, [tenantId+status]',
+      idempotency_records: '&key, status, tenantId, branchId, operationType, fingerprint, createdAt, [tenantId+branchId+status]'
+    });
+
     // Handle structural integrity and recovery
     this.on('versionchange', () => {
       console.warn("Database structure updated in another tab. Reloading...");
@@ -426,6 +452,11 @@ export class PharmaFlowDB extends Dexie {
             }
           });
           table.hook('updating', (mods: any, _primKey: any, obj: any) => {
+            if (_primKey === undefined || _primKey === null) {
+              console.error(`[HOOK UPDATING ERROR] Table '${tableName}' called updating hook with primKey:`, _primKey);
+            } else {
+              console.log(`[HOOK UPDATING OK] Table '${tableName}' primKey:`, _primKey);
+            }
             const session = getCurrentUserSession();
             if (mods && typeof mods === 'object') {
               return {
@@ -562,17 +593,21 @@ export class PharmaFlowDB extends Dexie {
     }));
   }
   async addInvoiceHistory(log: { invoiceId: string; userId: string; userName: string; timestamp: string; action: string; details: string }) {
+    const now = log.timestamp || new Date().toISOString();
     return await this.Audit_Log.add({
       id: 'AUD-' + Date.now() + Math.random().toString(36).substring(3, 8),
-      user_id: log.userId,
-      userName: log.userName,
+      user_id: log.userId || 'system',
+      userName: log.userName || 'System User',
       action: (log.action === 'CREATED' ? 'CREATE' : log.action === 'POSTED' ? 'POST' : log.action) as 'CREATE' | 'POST' | string,
       target_type: 'SALE',
-      target_id: log.invoiceId,
-      timestamp: log.timestamp,
-      details: log.details
+      target_id: log.invoiceId || '',
+      timestamp: now,
+      details: log.details || '',
+      Modified_At: now,
+      Record_ID: log.invoiceId || 'REC-INV'
     });
   }
+
   async saveMedicineAlert(alert: Record<string, unknown>) { return await this.systemAlerts.add(alert); }
   async persist() { return true; }
   
@@ -609,30 +644,53 @@ export class PharmaFlowDB extends Dexie {
     _riskLevel: string, _totalCost: number, refId: string, _attachment: string, date: string,
     transactionUuid?: string
   ) {
-    const sale: UnifiedInvoice = {
-      id: id || this.generateId('SALE'),
-      invoiceNumber: this.generateId('INV'),
-      date: date || new Date().toISOString(),
-      partnerId: customerId,
-      partnerName: 'Unknown Customer',
+    const invNum = this.generateId('INV');
+    const nowIso = new Date().toISOString();
+    const docDate = date || nowIso;
+    const saleId = id || this.generateId('SALE');
+    const payStatusStr = paymentStatus || 'Cash';
+    const finStatusStr = payStatusStr === 'Cash' ? 'Paid' : 'Unpaid';
+    const docStatusStr = docStatus || 'POSTED';
+
+    const sale: any = {
+      id: saleId,
+      invoiceNumber: invNum,
+      invoice_number: invNum,
+      date: docDate,
+      Date: docDate,
+      partnerId: customerId || 'CUST-GEN',
+      partner_id: customerId || 'CUST-GEN',
+      partnerName: 'Customer',
       type: 'SALE',
-      subtotal: total,
+      subtotal: total || 0,
       tax: 0,
-      finalTotal: total,
-      paidAmount: paymentStatus === 'Cash' ? total : 0,
-      paymentStatus: paymentStatus as 'Cash' | 'Credit',
-      financialStatus: paymentStatus === 'Cash' ? 'Paid' : 'Unpaid',
-      documentStatus: docStatus,
-      items: items,
-      isReturn: isReturn,
-      notes: `Ref: ${refId}`,
-      transactionUuid: transactionUuid,
-            isSynced: (typeof navigator !== 'undefined' && navigator.onLine),
+      finalTotal: total || 0,
+      paidAmount: payStatusStr === 'Cash' ? (total || 0) : 0,
+      paymentStatus: payStatusStr as 'Cash' | 'Credit',
+      payment_status: payStatusStr,
+      financialStatus: finStatusStr,
+      financial_status: finStatusStr,
+      documentStatus: docStatusStr,
+      document_status: docStatusStr,
+      InvoiceStatus: docStatusStr,
+      invoiceStatus: docStatusStr,
+      items: items || [],
+      isReturn: !!isReturn,
+      notes: `Ref: ${refId || saleId}`,
+      transactionUuid: transactionUuid || `TX-${Date.now()}`,
+      hash: `HASH-${Date.now()}`,
+      SaleID: saleId,
+      tenantId: 'tenant-default',
+      tenant_id: 'tenant-default',
+      branchId: 'main',
+      branch_id: 'main',
+      createdAt: nowIso,
+      isSynced: (typeof navigator !== 'undefined' && navigator.onLine),
       syncStatus: (typeof navigator !== 'undefined' && navigator.onLine) ? 'SYNCED' : 'PENDING',
-      updatedAt: new Date().toISOString()
+      updatedAt: nowIso
     };
     await this.invoices.put(sale);
-    try { await this.sales.put(sale as any); } catch {}
+    try { await this.sales.put(sale); } catch {}
     return sale;
   }
 
@@ -642,30 +700,53 @@ export class PharmaFlowDB extends Dexie {
     _riskLevel: string, refId: string, _attachment: string, isReturn: boolean, date: string,
     transactionUuid?: string
   ) {
-    const purchase: UnifiedInvoice = {
-      id: id || this.generateId('PUR'),
-      invoiceNumber: this.generateId('PURCH'),
-      date: date || new Date().toISOString(),
-      partnerId: supplierId,
-      partnerName: 'Unknown Supplier',
+    const invNum = this.generateId('PURCH');
+    const nowIso = new Date().toISOString();
+    const docDate = date || nowIso;
+    const purId = id || this.generateId('PUR');
+    const payStatusStr = isCash ? 'Cash' : 'Credit';
+    const finStatusStr = isCash ? 'Paid' : 'Unpaid';
+    const docStatusStr = docStatus || 'POSTED';
+
+    const purchase: any = {
+      id: purId,
+      invoiceNumber: invNum,
+      invoice_number: invNum,
+      invoiceId: invNum,
+      date: docDate,
+      Date: docDate,
+      partnerId: supplierId || 'SUPP-GEN',
+      partner_id: supplierId || 'SUPP-GEN',
+      partnerName: 'Supplier',
       type: 'PURCHASE',
-      subtotal: total,
+      subtotal: total || 0,
       tax: 0,
-      finalTotal: total,
-      paidAmount: isCash ? total : 0,
-      paymentStatus: isCash ? 'Cash' : 'Credit',
-      financialStatus: isCash ? 'Paid' : 'Unpaid',
-      documentStatus: docStatus,
-      items: items,
-      isReturn: isReturn,
-      notes: `Ref: ${refId}`,
-      transactionUuid: transactionUuid,
-            isSynced: (typeof navigator !== 'undefined' && navigator.onLine),
+      finalTotal: total || 0,
+      paidAmount: isCash ? (total || 0) : 0,
+      paymentStatus: payStatusStr as 'Cash' | 'Credit',
+      payment_status: payStatusStr,
+      financialStatus: finStatusStr,
+      financial_status: finStatusStr,
+      documentStatus: docStatusStr,
+      document_status: docStatusStr,
+      InvoiceStatus: docStatusStr,
+      invoiceStatus: docStatusStr,
+      items: items || [],
+      isReturn: !!isReturn,
+      notes: `Ref: ${refId || purId}`,
+      transactionUuid: transactionUuid || `TX-${Date.now()}`,
+      hash: `HASH-${Date.now()}`,
+      tenantId: 'tenant-default',
+      tenant_id: 'tenant-default',
+      branchId: 'main',
+      branch_id: 'main',
+      createdAt: nowIso,
+      isSynced: (typeof navigator !== 'undefined' && navigator.onLine),
       syncStatus: (typeof navigator !== 'undefined' && navigator.onLine) ? 'SYNCED' : 'PENDING',
-      updatedAt: new Date().toISOString()
+      updatedAt: nowIso
     };
     await this.invoices.put(purchase);
-    try { await this.purchases.put(purchase as any); } catch {}
+    try { await this.purchases.put(purchase); } catch {}
     return purchase;
   }
 

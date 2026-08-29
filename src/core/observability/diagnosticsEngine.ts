@@ -172,8 +172,8 @@ export class DiagnosticsEngine {
 
     // Deduplicate in error_aggregates & save diagnostic record in Dexie safely
     try {
-      if (db && db.error_aggregates && db.system_diagnostics) {
-        await db.transaction('rw', db.error_aggregates, db.system_diagnostics, async () => {
+      if (db && db.error_aggregates && db.system_diagnostics && db.isOpen()) {
+        await db.transaction('rw', 'error_aggregates', 'system_diagnostics', async () => {
           // 1. Update Aggregate Counter
           const existingAgg = await db.error_aggregates.get(fingerprint);
           if (existingAgg) {

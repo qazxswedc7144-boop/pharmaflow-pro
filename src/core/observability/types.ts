@@ -6,6 +6,7 @@ export type ObservabilityCategory =
   | 'SESSION'
   | 'DATABASE'
   | 'TRANSACTION'
+  | 'FINANCIAL'
   | 'SYNC'
   | 'VALIDATION'
   | 'BUSINESS_RULE'

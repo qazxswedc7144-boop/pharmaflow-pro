@@ -5,8 +5,7 @@ import {
   AggregatedSystemHealth,
   SystemHealthStatus,
   SystemOperatingMode,
-  HealthSubsystemStatus,
-  SubsystemHealth
+  HealthSubsystemStatus
 } from './types';
 import { observabilityEvents } from './observabilityEvents';
 
@@ -34,10 +33,11 @@ export class HealthMonitor {
     let dbStatus: HealthSubsystemStatus = 'HEALTHY';
     const dbDetails: Record<string, any> = { isOpen: false, tableCount: 0 };
     try {
-      if (db && db.isOpen()) {
+      if (typeof indexedDB === 'undefined') {
+        dbDetails.note = 'Headless or Node environment without IndexedDB';
+      } else if (db && db.isOpen()) {
         dbDetails.isOpen = true;
         dbDetails.tableCount = db.tables.length;
-        // Verify a simple read operation
         await db.settings.limit(1).toArray();
       } else if (db) {
         await db.open();
@@ -77,6 +77,9 @@ export class HealthMonitor {
     if (typeof localStorage !== 'undefined') {
       const token = localStorage.getItem('pharmaflow_access_token') || localStorage.getItem('pharmaflow_user');
       authDetails.hasToken = Boolean(token);
+      if (!authDetails.hasToken) {
+        authStatus = 'DEGRADED';
+      }
     }
 
     // 5. Performance Health Check

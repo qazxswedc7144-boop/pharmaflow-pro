@@ -365,14 +365,15 @@ export class AccountingEngine {
 
   private static async createLine(entryId: string, accountId: string, debit: number, credit: number): Promise<JournalLine> {
     const id = `JL-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const safeAccId = accountId || 'ACC-GENERIC';
     
     return {
       id,
       lineId: id,
       entryId,
       entry_id: entryId,
-      accountId,
-      account_id: accountId,
+      accountId: safeAccId,
+      account_id: safeAccId,
       accountName: 'حساب محلي',
       debit,
       credit,

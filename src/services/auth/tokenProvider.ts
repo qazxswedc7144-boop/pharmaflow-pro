@@ -202,6 +202,10 @@ export class TokenProvider {
           return this.getAccessToken() || '';
         }
 
+        import('@/core/observability/observabilityService').then(({ observabilityService }) => {
+          observabilityService.recordError(err, { feature: 'AUTH' }, 'AUTH', 'WARNING').catch(() => {});
+        });
+
         console.error('🔒 [TokenProvider] Refresh token rejected by server:', err.message || err);
         await this.logout({ revokeOnServer: false });
         throw new Error('AUTH_EXPIRED');
