@@ -20,7 +20,7 @@ export class WorkflowContextFactory {
     const deviceId = options?.deviceId || 'browser-client';
     const idempotencyKey =
       options?.idempotencyKey ||
-      generateTransactionUuid(operationType.toUpperCase().replace(/[^A-Z0-9]/g, '_'));
+      generateTransactionUuid(operationType.toUpperCase().replace(/[^A-Z0-9]/g, '_') as any);
 
     return {
       workflowId,

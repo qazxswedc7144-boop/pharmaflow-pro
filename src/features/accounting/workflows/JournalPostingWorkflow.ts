@@ -68,23 +68,32 @@ export class JournalPostingWorkflow implements BusinessWorkflow<JournalPostingIn
   ): Promise<JournalPostingResult> {
     const journalId = db.generateId('JE');
 
-    const mappedLines: JournalLine[] = input.lines.map((l, index) => ({
-      id: `${journalId}-L${index + 1}`,
-      journalEntryId: journalId,
-      accountId: l.accountId,
-      accountCode: l.accountCode || l.accountId,
-      accountName: l.accountName || '',
-      debit: Number(l.debit || 0),
-      credit: Number(l.credit || 0),
-      description: l.memo || input.description
-    }));
+    const mappedLines: JournalLine[] = input.lines.map((l, index) => {
+      const debit = Number(l.debit || 0);
+      const credit = Number(l.credit || 0);
+      return {
+        id: `${journalId}-L${index + 1}`,
+        lineId: `${journalId}-L${index + 1}`,
+        entryId: journalId,
+        accountId: l.accountId,
+        accountCode: l.accountCode || l.accountId,
+        accountName: l.accountName || '',
+        debit,
+        credit,
+        type: debit >= credit ? 'DEBIT' : 'CREDIT',
+        amount: Math.max(debit, credit),
+        description: l.memo || input.description
+      };
+    });
 
     const entry: AccountingEntry = {
       id: journalId,
       date: input.date,
       description: input.description,
-      reference: input.reference || ctx.idempotencyKey,
-      status: 'POSTED',
+      referenceId: input.reference || ctx.idempotencyKey,
+      sourceId: input.reference || ctx.idempotencyKey || journalId,
+      sourceType: 'JOURNAL_WORKFLOW',
+      status: 'Posted',
       lines: mappedLines,
       createdAt: new Date().toISOString()
     };

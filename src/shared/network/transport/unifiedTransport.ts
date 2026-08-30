@@ -26,19 +26,18 @@ const PROFILE_DEFAULTS: Record<RequestProfile, { timeoutMs: number; retries: num
   DEFAULT: { timeoutMs: 15000, retries: 2, requireIdempotency: false },
 };
 
+let inMemoryDeviceId: string | null = null;
+
 /**
  * Helper to get or generate stable Device ID
  */
 function getStableDeviceId(): string {
-  if (typeof localStorage !== "undefined") {
-    let deviceId = localStorage.getItem("pharmaflow_device_id");
-    if (!deviceId) {
-      deviceId = `PF-DEV-${generateIdempotencyKey().slice(0, 8).toUpperCase()}`;
-      localStorage.setItem("pharmaflow_device_id", deviceId);
-    }
-    return deviceId;
+  const session = TokenProvider.getCurrentSession();
+  if (session?.deviceId) return session.deviceId;
+  if (!inMemoryDeviceId) {
+    inMemoryDeviceId = `PF-DEV-${generateIdempotencyKey().slice(0, 8).toUpperCase()}`;
   }
-  return "PF-DEV-CONTAINER-MAIN";
+  return inMemoryDeviceId;
 }
 
 /**

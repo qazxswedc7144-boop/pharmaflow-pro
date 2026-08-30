@@ -4,6 +4,7 @@ import { integrityVerifier } from '@/services/integrity/integrityVerifier';
 import { eventBus, EVENTS } from '@/services/eventBus';
 import { Card, Button, Badge } from '@/components/shared/SharedUI';
 import { configurationService } from '@/services/config/configurationService';
+import { unifiedTransport } from '@/services/network/unifiedTransport';
 import { 
   ShieldCheck, Activity, AlertCircle, CheckCircle2, RefreshCw, 
   Smartphone, Database, Wifi, Lock, DownloadCloud, UploadCloud, 
@@ -121,7 +122,7 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
     }
 
     // Last successful sync state (could be saved in local storage or simulated)
-    const storedLastSync = localStorage.getItem('pf_last_sync_time');
+    const storedLastSync = configurationService.getSync<string>('pf_last_sync_time');
     if (storedLastSync) {
       setLastSyncText(storedLastSync);
     } else {
@@ -175,8 +176,8 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
   const fetchCloudBackups = useCallback(async () => {
     setCloudBackupsLoading(true);
     try {
-      const res = await fetch(`/api/security/backup/list?tenantId=${tenantId}`);
-      const data = await res.json();
+      const res = await unifiedTransport.get<any>(`/api/security/backup/list?tenantId=${tenantId}`);
+      const data = res.data;
       if (data.status === 'success' && data.backups) {
         setCloudBackupsList(data.backups);
       }
@@ -244,7 +245,7 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
     setDeviceFingerprint(fingerprint);
 
     // Retrieve active license key if any
-    const activeSig = localStorage.getItem('erp_license_signature');
+    const activeSig = configurationService.getSync<string>('erp_license_signature');
     if (activeSig) {
       setLicenseSignature(activeSig);
       setLicenseKeyEntered(activeSig);
@@ -255,8 +256,8 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
 
     // Query Device Registration status from backend
     try {
-      const res = await fetch(`/api/security/device/status/${existingUUID}`);
-      const data = await res.json();
+      const res = await unifiedTransport.get<any>(`/api/security/device/status/${existingUUID}`);
+      const data = res.data;
       if (data.status === 'success' && data.data) {
         setDeviceIsRegistered(true);
         setDeviceName(data.data.deviceName || storedDeviceName);
@@ -323,21 +324,17 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
     setDeviceRegLoading(true);
     setDeviceRegMessage('');
     try {
-      const res = await fetch('/api/security/device/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: deviceUUID,
-          tenantId,
-          branchId,
-          deviceName,
-          androidVersion,
-          appVersion
-        })
+      const res = await unifiedTransport.post<any>('/api/security/device/register', {
+        deviceId: deviceUUID,
+        tenantId,
+        branchId,
+        deviceName,
+        androidVersion,
+        appVersion
       });
-      const data = await res.json();
+      const data = res.data;
       if (data.status === 'success') {
-        localStorage.setItem('erp_device_name', deviceName);
+        configurationService.set('erp_device_name', deviceName).catch(() => {});
         setDeviceIsRegistered(true);
         setDeviceRegMessage('🎉 تم تسجيل الجهاز بنجاح بالتزامن مع قيود باقة SaaS.');
       } else {
@@ -371,16 +368,12 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
 
       // 3. Post to cloud storage API
       const filename = `${tenantId}_backup_${backupId}.bak`;
-      const upRes = await fetch('/api/security/backup/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId,
-          filename,
-          payload: record.dataSnapshot
-        })
+      const upRes = await unifiedTransport.post<any>('/api/security/backup/upload', {
+        tenantId,
+        filename,
+        payload: record.dataSnapshot
       });
-      const upData = await upRes.json();
+      const upData = upRes.data;
       
       if (upData.status === 'success') {
         let suffixMsg = '';
@@ -434,8 +427,8 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
     setBackupActionLoading(true);
     setBackupStatusMessage('جاري سحب نسخة التشفير السحابية من Simulated GCS...');
     try {
-      const res = await fetch(`/api/security/backup/download?tenantId=${tenantId}&filename=${backupFile.filename}`);
-      const data = await res.json();
+      const res = await unifiedTransport.get<any>(`/api/security/backup/download?tenantId=${tenantId}&filename=${backupFile.filename}`);
+      const data = res.data;
       
       if (data.status !== 'success' || !data.payload) {
         throw new Error('الملف السحابي تالف أو تعذر تحميله.');
@@ -463,16 +456,12 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
   const handleGenerateLicenseSignature = async () => {
     setIsGeneratingSignature(true);
     try {
-      const res = await fetch('/api/security/license/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceFingerprint,
-          tenantId,
-          expiryDate: licenseExpiry
-        })
+      const res = await unifiedTransport.post<any>('/api/security/license/generate', {
+        deviceFingerprint,
+        tenantId,
+        expiryDate: licenseExpiry
       });
-      const data = await res.json();
+      const data = res.data;
       if (data.status === 'success' && data.signature) {
         setLicenseSignature(data.signature);
         setLicenseKeyEntered(data.signature);
@@ -488,25 +477,21 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
   const handleSaveAndVerifyLicense = async () => {
     setDeviceRegLoading(true);
     try {
-      const res = await fetch('/api/security/license/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceFingerprint,
-          tenantId,
-          expiryDate: licenseExpiry,
-          signature: licenseKeyEntered
-        })
+      const res = await unifiedTransport.post<any>('/api/security/license/verify', {
+        deviceFingerprint,
+        tenantId,
+        expiryDate: licenseExpiry,
+        signature: licenseKeyEntered
       });
-      const data = await res.json();
+      const data = res.data;
       if (data.status === 'success' && data.isValid) {
-        localStorage.setItem('erp_license_signature', licenseKeyEntered);
+        configurationService.set('erp_license_signature', licenseKeyEntered).catch(() => {});
         setLicenseSignature(licenseKeyEntered);
         setLicenseVerificationText('مرخص ومفعل بالكامل ✔');
         setIsLicenseLocked(false);
         NotificationService.success('🎉 تهانينا! تم مطابقة التوقيع الرقمي الثلاثي وتفعيل رخصة الجهاز بنجاح.');
       } else {
-        localStorage.removeItem('erp_license_signature');
+        configurationService.delete('erp_license_signature').catch(() => {});
         setLicenseVerificationText('تنبيه: الترخيص غير صالح للتفويض الرقمي ❌');
         setIsLicenseLocked(true);
       }
@@ -615,7 +600,7 @@ const SystemHealthModule: React.FC<{ onNavigate?: (v: any) => void }> = ({ onNav
               onClick={() => {
                 loadSystemStats();
                 setReplicationConnected(navigator.onLine);
-                localStorage.setItem('pf_last_sync_time', 'منذ ثوانٍ قليلة');
+                configurationService.set('pf_last_sync_time', 'منذ ثوانٍ قليلة').catch(() => {});
                 NotificationService.success('تم تحديث القياسات الحيوية لنواة النظام الموزعة.');
               }}
             >

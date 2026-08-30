@@ -1,16 +1,10 @@
 import { db } from '@/core/db';
-import { InvoiceItem, InvoiceStatus, Sale, Purchase, Receipt, Payment, Voucher, TransferStatus, AccountingEntry, JournalLine } from '@/types';
-import { ValidationService as validationService } from '@/services/integrity/ValidationService';
+import { InvoiceItem, InvoiceStatus, Receipt, Payment, TransferStatus, JournalLine } from '@/types';
 import { TransactionService } from '@/services/transactions/TransactionService';
 import { FaultService } from '@/services/integrity/FaultService';
 import { FIFOEngine as fifoEngine } from '@features/inventory/services/fifoEngine';
 import { StockMovementEngine as stockEngine } from '@features/inventory/services/stockMovementEngine';
-import { InventoryService } from '@features/inventory/services/InventoryService';
-import { AccountingEngine as accountingEngine } from '@features/accounting/services/AccountingEngine';
-import { CurrencyService } from '@/services/localization/CurrencyService';
 import { InvoiceRepository } from '@/database/repositories/invoice.repository';
-import { PurchaseRepository } from '@/database/repositories/PurchaseRepository';
-import { SalesRepository } from '@/database/repositories/SalesRepository';
 import { AccountingRepository } from '@/database/repositories/AccountingRepository';
 import { FinancialTransactionRepository } from '@/database/repositories/FinancialTransactionRepository';
 import { SupplierRepository } from '@/database/repositories/SupplierRepository';
@@ -21,7 +15,6 @@ import { SubscriptionEntitlementService } from '@/services/saas/subscriptionEnti
 import { UsageMeterService } from '@/services/saas/usageMeterService';
 import { generateTransactionUuid } from '@/utils/uuid';
 import { AuditService } from '@/services/system/AuditService';
-import { ErrorTrackingService } from '@/services/system/ErrorTrackingService';
 import { ProjectionEventBus } from '@/services/system/ProjectionEventBus';
 import { LockService } from '@features/locking/lock.service';
 import { IdempotencyRegistry } from '@/core/integrity/idempotencyRegistry';
@@ -99,26 +92,26 @@ export interface WorkflowStockTransferStatusParams {
   receivedQuantities?: Record<string, number>;
 }
 
-const PURCHASE_WORKFLOW_TABLES = [
+export const PURCHASE_WORKFLOW_TABLES = [
   'invoices', 'invoiceItems', 'products', 'inventoryTransactions', 
   'inventory_layers', 'suppliers', 'journalEntries', 'journalLines', 
   'accounts', 'financialTransactions', 'auditLogs', 'idempotencyKeys', 
   'projectionEvents', 'customers', 'vouchers'
 ];
 
-const SALES_WORKFLOW_TABLES = [
+export const SALES_WORKFLOW_TABLES = [
   'invoices', 'invoiceItems', 'products', 'inventoryTransactions', 
   'inventory_layers', 'fifo_consumption_log', 'customers', 'journalEntries', 
   'journalLines', 'accounts', 'financialTransactions', 'auditLogs', 
   'idempotencyKeys', 'projectionEvents', 'vouchers', 'suppliers'
 ];
 
-const ADJUSTMENT_WORKFLOW_TABLES = [
+export const ADJUSTMENT_WORKFLOW_TABLES = [
   'inventoryTransactions', 'products', 'journalEntries', 'journalLines', 
   'accounts', 'auditLogs', 'idempotencyKeys', 'projectionEvents'
 ];
 
-const VOUCHER_WORKFLOW_TABLES = [
+export const VOUCHER_WORKFLOW_TABLES = [
   'vouchers', 'invoices', 'suppliers', 'customers', 'financialTransactions', 
   'journalEntries', 'journalLines', 'accounts', 'auditLogs', 
   'idempotencyKeys', 'projectionEvents'
@@ -146,14 +139,14 @@ export class UnifiedBusinessWorkflowOrchestrator {
   /**
    * Check Trial plan usage bounds and assert subscription entitlement
    */
-  private static async checkTrialLimit(isEdit = false, operationName = 'عملية تجارية'): Promise<void> {
+  public static async checkTrialLimit(isEdit = false, operationName = 'عملية تجارية'): Promise<void> {
     await SubscriptionEntitlementService.assertOperationAllowed(operationName, { isEdit });
   }
 
   /**
    * Manage idempotency lifecycle before entering critical execution section
    */
-  private static async acquireIdempotencyKey(key: string): Promise<void> {
+  public static async acquireIdempotencyKey(key: string): Promise<void> {
     if (!key) return;
     const existing = await IdempotencyRegistry.get(key);
     if (existing) {
@@ -187,7 +180,7 @@ export class UnifiedBusinessWorkflowOrchestrator {
   /**
    * Finalize idempotency key status to COMPLETED and invalidate usage meter cache
    */
-  private static async markIdempotencyCompleted(key: string): Promise<void> {
+  public static async markIdempotencyCompleted(key: string): Promise<void> {
     if (!key) return;
     TransactionService.registerCompletedUuid(key);
     await IdempotencyRegistry.updateStatus(key, 'COMMITTED').catch(() => null);
@@ -198,7 +191,7 @@ export class UnifiedBusinessWorkflowOrchestrator {
   /**
    * Release processing idempotency key on error
    */
-  private static async releaseIdempotencyKey(key: string): Promise<void> {
+  public static async releaseIdempotencyKey(key: string): Promise<void> {
     if (!key) return;
     try {
       const rec = await IdempotencyRegistry.get(key);
@@ -627,7 +620,7 @@ export class UnifiedBusinessWorkflowOrchestrator {
   }
 
   // Helper methods
-  private static createJournalLine(entryId: string, accountId: string, debit: number, credit: number): JournalLine {
+  public static createJournalLine(entryId: string, accountId: string, debit: number, credit: number): JournalLine {
     const id = db.generateId('JL');
     return {
       id,

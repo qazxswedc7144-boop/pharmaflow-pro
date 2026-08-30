@@ -35,6 +35,7 @@ export interface IdempotencyRecord {
   createdAt: string;
   completedAt?: string;
   result?: any;
+  responseData?: any;
   failureReason?: string;
 }
 

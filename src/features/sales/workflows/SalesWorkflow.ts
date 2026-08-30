@@ -56,7 +56,7 @@ export class SalesWorkflow implements BusinessWorkflow<SalesWorkflowInput, Sales
     await validationService.validateInvoice(input, 'SALE');
 
     // Check stock availability if negative stock is disallowed by configuration
-    const allowNegativeStock = configurationService.get('inventory.allowNegativeStock', false);
+    const allowNegativeStock = configurationService.getSync<boolean>('inventory.allowNegativeStock') ?? false;
     if (!allowNegativeStock && !input.isReturn) {
       for (const item of input.items) {
         if (!item.productId) continue;

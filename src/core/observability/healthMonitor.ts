@@ -7,6 +7,7 @@ import {
   SystemOperatingMode,
   HealthSubsystemStatus
 } from './types';
+import { TokenProvider } from '@/services/auth/tokenProvider';
 import { observabilityEvents } from './observabilityEvents';
 
 export class HealthMonitor {
@@ -74,12 +75,11 @@ export class HealthMonitor {
     // 4. Auth Health Check
     let authStatus: HealthSubsystemStatus = 'HEALTHY';
     const authDetails: Record<string, any> = { hasToken: false };
-    if (typeof localStorage !== 'undefined') {
-      const token = localStorage.getItem('pharmaflow_access_token') || localStorage.getItem('pharmaflow_user');
-      authDetails.hasToken = Boolean(token);
-      if (!authDetails.hasToken) {
-        authStatus = 'DEGRADED';
-      }
+    const token = TokenProvider.getAccessToken();
+    const session = TokenProvider.getCurrentSession();
+    authDetails.hasToken = Boolean(token || session?.user);
+    if (!authDetails.hasToken) {
+      authStatus = 'DEGRADED';
     }
 
     // 5. Performance Health Check

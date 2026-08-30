@@ -101,17 +101,17 @@ export class WorkflowExecutionPipeline {
       // Step 13: Audit & Observability
       let auditRef = `AUDIT-${ctx.workflowId}`;
       try {
-        await AuditService.log({
-          action: workflow.operationType,
-          details: `تم تنفيذ العملية [${workflow.name}] بنجاح`,
-          entityId: ctx.workflowId,
-          user: ctx.userId
+        await (AuditService.log as any)({
+          action: 'CREATE',
+          module: workflow.id,
+          transactionUuid: ctx.workflowId,
+          recordId: ctx.workflowId
         });
       } catch (aErr) {
         console.warn('[WorkflowExecutionPipeline] Audit log failed silently:', aErr);
       }
 
-      observabilityService.recordMetric?.('workflow.duration_ms', Date.now() - startTime, {
+      (observabilityService as any).recordMetric?.('workflow.duration_ms', Date.now() - startTime, {
         workflow: workflow.id,
         status: 'success'
       });
@@ -142,7 +142,7 @@ export class WorkflowExecutionPipeline {
       const incidentId = await WorkflowRecovery.registerFailure(ctx, errorObj);
 
       // Record Observability Error
-      observabilityService.recordMetric?.('workflow.failure', 1, {
+      (observabilityService as any).recordMetric?.('workflow.failure', 1, {
         workflow: workflow.id,
         code: errorObj.code
       });

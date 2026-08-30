@@ -391,4 +391,15 @@ export class InventoryService {
     const available = await this.getWarehouseStock(warehouseId, productId);
     return available >= requestedQty;
   }
+
+  /**
+   * Adjusts stock quantity for a product.
+   */
+  static async adjustStock(params: { productId: string; warehouseId?: string; newQty: number; reason?: string; userId?: string }): Promise<void> {
+    const prod = await db.products.get(params.productId);
+    if (!prod) throw new Error(`Product ${params.productId} not found`);
+    const currentQty = prod.quantity || (prod as any).StockQuantity || 0;
+    const delta = params.newQty - currentQty;
+    await this.updateStock(params.productId, delta);
+  }
 }

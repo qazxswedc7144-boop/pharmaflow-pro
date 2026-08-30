@@ -17,6 +17,7 @@ import { ProductMatchingEngine } from '../productMatchingEngine';
 import { normalizeToISODate } from '@/utils/expiryUtils';
 import { PreloadedAliasContext, AliasMatchingEngine, AliasNormalization } from '../aliasLearning';
 import { ResolutionPolicy } from '../domain/resolution.policy';
+import { configurationService } from '@/services/config/configurationService';
 
 export interface CreateSessionOptions {
   tenantId: string;
@@ -655,14 +656,11 @@ export class BatchSessionService {
    */
   static getSession(sessionId: string): BatchProcessingSession | undefined {
     let session = this.activeSessions.get(sessionId);
-    if (!session && typeof window !== 'undefined' && window.localStorage) {
+    if (!session) {
       try {
-        const stored = localStorage.getItem(`${this.STORAGE_PREFIX}${sessionId}`);
-        if (stored) {
-          session = JSON.parse(stored) as BatchProcessingSession;
-          if (session) {
-            this.activeSessions.set(sessionId, session);
-          }
+        session = configurationService.getSync<BatchProcessingSession>(`${this.STORAGE_PREFIX}${sessionId}`) || undefined;
+        if (session) {
+          this.activeSessions.set(sessionId, session);
         }
       } catch (err) {
         console.warn('[BatchSessionService] Error restoring session:', err);
@@ -691,12 +689,6 @@ export class BatchSessionService {
   }
 
   private static persistToLocalStorage(session: BatchProcessingSession): void {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        localStorage.setItem(`${this.STORAGE_PREFIX}${session.sessionId}`, JSON.stringify(session));
-      } catch {
-        // ignore quota errors
-      }
-    }
+    configurationService.set(`${this.STORAGE_PREFIX}${session.sessionId}`, session).catch(() => {});
   }
 }

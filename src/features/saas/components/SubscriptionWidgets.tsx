@@ -13,6 +13,7 @@ import { UsageMeterService } from '@/services/saas/usageMeterService';
 import { SubscriptionContactFooter, UNIFIED_SUPPORT_NUMBER } from './SubscriptionContactFooter';
 import { SubscriptionWelcomeModal, SubscriptionOnboardingModal } from './SubscriptionWelcomeModal';
 import { useAuthStore } from '@/store/authStore';
+import { configurationService } from '@/services/config/configurationService';
 
 export { SubscriptionContactFooter, SubscriptionWelcomeModal, SubscriptionOnboardingModal };
 
@@ -332,10 +333,9 @@ export function ReviewerSaaSTester() {
   const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'OWNER' || (user as any)?.role === 'PLATFORM_OWNER';
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = parseInt(sessionStorage.getItem('saas_qa_test_offset') || '0', 10);
-      setOffsetVal(stored);
-    }
+    const storedStr = configurationService.getSync<string>('saas_qa_test_offset');
+    const stored = parseInt(storedStr || '0', 10);
+    setOffsetVal(isNaN(stored) ? 0 : stored);
   }, []);
 
   // Strict Security Gate: Never render for normal users or in production without super admin privileges

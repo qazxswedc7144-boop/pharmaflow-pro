@@ -21,12 +21,13 @@ export async function runLegacySettingsMigration(): Promise<boolean> {
     const now = new Date().toISOString();
 
     // 1. Collect all legacy localStorage items
-    if (typeof localStorage !== 'undefined') {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const legacyStorage = window.localStorage;
       for (const [canonicalKey, def] of Object.entries(CONFIG_REGISTRY)) {
         if (!def.legacyKeys) continue;
 
         for (const legacyKey of def.legacyKeys) {
-          const val = localStorage.getItem(legacyKey);
+          const val = legacyStorage.getItem(legacyKey);
           if (val !== null && val !== undefined && val !== '') {
             let parsedVal: any = val;
             if (val === 'true') parsedVal = true;

@@ -16,7 +16,7 @@ export class IntegrityRecoveryManager {
     workflowId: string,
     operationType: string,
     error: Error,
-    metadata?: any
+    _metadata?: any
   ): Promise<string> {
     const incidentId = `INC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     console.log(`[IntegrityRecoveryManager] Registered failure ${incidentId} for ${workflowId} (${operationType}): ${error.message}`);

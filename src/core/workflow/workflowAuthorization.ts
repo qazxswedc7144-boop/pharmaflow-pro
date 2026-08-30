@@ -1,6 +1,5 @@
 import { BusinessWorkflow, WorkflowContext } from './workflow.types';
 import { WorkflowExecutionError } from './workflowError';
-import { authService } from '@features/auth/services/authService';
 import { GlobalGuard } from '@/services/security/GlobalGuard';
 import { useAuthStore } from '@/store/authStore';
 

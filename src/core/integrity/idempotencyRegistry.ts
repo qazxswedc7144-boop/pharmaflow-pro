@@ -98,7 +98,10 @@ export class IdempotencyRegistry {
     if (existing) {
       existing.status = status;
       if (status === 'COMMITTED') existing.completedAt = now;
-      if (result !== undefined) existing.result = result;
+      if (result !== undefined) {
+        existing.result = result;
+        existing.responseData = result;
+      }
       if (failureReason !== undefined) existing.failureReason = failureReason;
 
       await this.save(existing);

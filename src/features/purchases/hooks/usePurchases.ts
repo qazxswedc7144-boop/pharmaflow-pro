@@ -1,5 +1,6 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { configurationService } from '@/services/config/configurationService';
 import { db } from '@/core/db';
 import { Product, InvoiceStatus, InvoiceItem, PaymentStatus, Supplier } from '@/types';
 import { useUI, useInventory, useAccounting } from '@/contexts/AppContext';
@@ -941,7 +942,7 @@ export function usePurchases(onNavigate?: (view: string, params?: Record<string,
         showNotification("Invoice Saved Successfully\nReturning to Dashboard...", 'success', 1000);
         addToast("Invoice Saved Successfully\nReturning to Dashboard...", "success");
 
-        localStorage.removeItem(DRAFT_KEY);
+        configurationService.set(DRAFT_KEY, null).catch(() => {});
         setHasUnsavedAI(false);
         
         await auditLogService.log({

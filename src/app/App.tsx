@@ -38,6 +38,7 @@ import {
 } from '@features/saas/components/SubscriptionWidgets';
 import { SubscriptionStatusProvider } from '@/services/saas/subscriptionStatusProvider';
 import { TokenProvider } from '@/services/auth/tokenProvider';
+import { configurationService } from '@/services/config/configurationService';
 import { 
   SubscriptionEntitlementService,
   shouldShowSubscriptionOnboarding 
@@ -266,8 +267,8 @@ function MainLayout() {
         const item = await db.systemSettings.get('authenticationEnabled');
         const authEnabled = item ? item.value === true : false;
         
-        // Align localStorage flag so that other components can pull it synchronously
-        localStorage.setItem('pharmaflow_auth_enabled', authEnabled ? 'true' : 'false');
+        // Align auth enabled flag in configurationService so components can pull it synchronously
+        configurationService.set('pharmaflow_auth_enabled', authEnabled ? 'true' : 'false').catch(() => {});
         
         if (!authEnabled) {
           // 2. IF FALSE: Bypass all network checks, initialize local administrator mocks, and resolve <MainApplication />
@@ -581,7 +582,7 @@ function MainLayout() {
 
     const init = async () => { 
       // Clear DB to resolve IDBKeyRange error if requested (one-time fix)
-      if (!localStorage.getItem('pharmaflow_db_reset_v4')) {
+      if (!configurationService.getSync('pharmaflow_db_reset_v4')) {
         try {
           console.log("🧹 Clearing IndexedDB to resolve IDBKeyRange error...");
           const databases = await window.indexedDB.databases();
@@ -594,7 +595,7 @@ function MainLayout() {
         } catch (e) {
           window.indexedDB.deleteDatabase("pharmaflow");
         }
-        localStorage.setItem('pharmaflow_db_reset_v4', 'true');
+        configurationService.set('pharmaflow_db_reset_v4', 'true').catch(() => {});
       }
 
       try {

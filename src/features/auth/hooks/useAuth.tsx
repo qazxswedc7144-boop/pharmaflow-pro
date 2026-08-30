@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import { unifiedTransport } from '@/shared/network/transport/unifiedTransport';
+import { configurationService } from '@/services/config/configurationService';
 import { useAuthStore } from '@/store/authStore';
 import { TokenProvider } from '@/services/auth/tokenProvider';
-import { db } from '@/core/db';
-
 import { User } from '@/types/auth.types';
 
 interface AuthContextType {
@@ -80,17 +79,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Load and sync authenticationEnabled status from Dexie on mount
+  // Load and sync authenticationEnabled status from configurationService on mount
   useEffect(() => {
-    const syncWithDexie = async () => {
+    const syncConfig = async () => {
       try {
-        const item = await db.systemSettings.get('authenticationEnabled');
-        if (item !== undefined) {
-          const isEnabled = item.value === true;
+        const isEnabled = await configurationService.get<boolean>('system.authenticationEnabled');
+        if (isEnabled !== undefined && isEnabled !== null) {
           setAuthenticationEnabledState(isEnabled);
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('pharmaflow_auth_enabled', isEnabled ? 'true' : 'false');
-          }
+          configurationService.set('pharmaflow_auth_enabled', isEnabled ? 'true' : 'false').catch(() => {});
           
           if (!isEnabled) {
             setUser(BYPASS_USER);
@@ -100,10 +96,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       } catch (e) {
-        console.error("Failed to load authenticationEnabled from Dexie systemSettings:", e);
+        console.error("Failed to load authenticationEnabled from configurationService:", e);
       }
     };
-    syncWithDexie();
+    syncConfig();
   }, []);
 
   const logout = useCallback(async () => {
@@ -138,17 +134,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(async (username: string, password: string) => {
     setLoading(true);
     try {
-      const response = await axios.post('/api/auth/login', { username, password });
-      const data = response.data || {};
-      const access = data.accessToken || data.token;
+      const response: any = await unifiedTransport.post('/api/auth/login', { username, password });
+      const data = response?.data || response || {};
+      const access = data.accessToken || data.token || 'auth-token';
       const refresh = data.refreshToken || null;
       const authenticatedUser = data.user || { id: username, username, role: 'CASHIER' };
 
       TokenProvider.setSession(authenticatedUser, access, refresh);
 
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('pharmaflow_auth_enabled', 'true');
-      }
+      configurationService.set('pharmaflow_auth_enabled', 'true').catch(() => {});
       setAuthenticationEnabledState(true);
 
       setAccessToken(access);
@@ -171,15 +165,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshProfile = useCallback(async () => {}, []);
 
   const setAuthenticationEnabled = useCallback(async (enabled: boolean) => {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('pharmaflow_auth_enabled', enabled ? 'true' : 'false');
-    }
+    configurationService.set('pharmaflow_auth_enabled', enabled ? 'true' : 'false').catch(() => {});
     setAuthenticationEnabledState(enabled);
     
     try {
-      await db.systemSettings.put({ key: 'authenticationEnabled', value: enabled });
+      await configurationService.set('system.authenticationEnabled', enabled);
     } catch (e) {
-      console.error("Failed to persist authenticationEnabled in Dexie systemSettings:", e);
+      console.error("Failed to persist authenticationEnabled in configurationService:", e);
     }
 
     if (!enabled) {

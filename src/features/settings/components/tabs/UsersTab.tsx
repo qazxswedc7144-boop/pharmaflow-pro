@@ -60,15 +60,18 @@ export const UsersTab: React.FC = () => {
                                                                                                                                                                                             'تقارير أخرى': { read: true, add: false, edit: false, delete: false },
                                                                                                                                                                                               });
 
-                                                                                                                                                                                                const toggleAction = (moduleName: string, action: 'read' | 'add' | 'edit' | 'delete') => {
-                                                                                                                                                                                                    setModulesPermissions(prev => ({
-                                                                                                                                                                                                          ...prev,
-                                                                                                                                                                                                                [moduleName]: {
-                                                                                                                                                                                                                        ...prev[moduleName],
-                                                                                                                                                                                                                                [action]: !prev[moduleName][action]
-                                                                                                                                                                                                                                      }
-                                                                                                                                                                                                                                          }));
-                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                const toggleAction = (moduleName: string, action: "read" | "add" | "edit" | "delete") => {
+    setModulesPermissions((prev: Record<string, { read: boolean; add: boolean; edit: boolean; delete: boolean }>) => {
+      const current = prev[moduleName] || { read: false, add: false, edit: false, delete: false };
+      return {
+        ...prev,
+        [moduleName]: {
+          ...current,
+          [action]: !current[action]
+        }
+      };
+    });
+  };
 
                                                                                                                                                                                                                                               const handleSelectUserPermissions = (user: any) => {
                                                                                                                                                                                                                                                   setSelectedUser(user);

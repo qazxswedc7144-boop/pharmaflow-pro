@@ -5,6 +5,7 @@
  */
 
 import { CorrectionFeedbackRecord } from './correctionFeedback.types';
+import { configurationService } from '@/services/config/configurationService';
 
 export class CorrectionFeedbackRepository {
   private static readonly STORAGE_KEY_PREFIX = 'pharmaflow_correction_feedback_';
@@ -34,14 +35,12 @@ export class CorrectionFeedbackRepository {
     existing.push(finalRecord);
     this.inMemoryRecords.set(tenantKey, existing);
 
-    // Save to localStorage safely if available
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const storageKey = `${this.STORAGE_KEY_PREFIX}${tenantKey}`;
-        localStorage.setItem(storageKey, JSON.stringify(existing.slice(-200))); // Keep last 200 records per tenant
-      } catch {
-        // ignore storage errors
-      }
+    // Save to configurationService safely
+    try {
+      const storageKey = `${this.STORAGE_KEY_PREFIX}${tenantKey}`;
+      configurationService.set(storageKey, existing.slice(-200)).catch(() => {});
+    } catch {
+      // ignore storage errors
     }
 
     return finalRecord;
@@ -58,12 +57,12 @@ export class CorrectionFeedbackRepository {
     }
   ): Promise<CorrectionFeedbackRecord[]> {
     let records = this.inMemoryRecords.get(tenantId);
-    if (!records && typeof localStorage !== 'undefined') {
+    if (!records) {
       try {
         const storageKey = `${this.STORAGE_KEY_PREFIX}${tenantId}`;
-        const stored = localStorage.getItem(storageKey);
+        const stored = configurationService.getSync<CorrectionFeedbackRecord[]>(storageKey);
         if (stored) {
-          records = JSON.parse(stored);
+          records = stored;
           this.inMemoryRecords.set(tenantId, records || []);
         }
       } catch {

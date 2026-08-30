@@ -13,12 +13,7 @@ export function createObservabilityContext(
 ): ObservabilityContext {
   const session = getCurrentUserSession();
 
-  let deviceId = configurationService.getSync<string>('device.uuid');
-  if (!deviceId && typeof localStorage !== 'undefined') {
-    deviceId = localStorage.getItem('erp_device_uuid') || 'DEV-LOCAL-01';
-  } else if (!deviceId) {
-    deviceId = 'DEV-LOCAL-01';
-  }
+  let deviceId = configurationService.getSync<string>('device.uuid') || 'DEV-LOCAL-01';
 
   return {
     correlationId: overrides?.correlationId || getActiveCorrelationId(),

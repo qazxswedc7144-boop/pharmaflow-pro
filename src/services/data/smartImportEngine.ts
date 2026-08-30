@@ -2,7 +2,7 @@
 import { extractTextFromImage } from '@features/ai/services/ocrService';
 import { normalizeArabic, cleanInvoiceText } from '@features/ai/services/arabicProcessor';
 import { parseInvoice, ParsedInvoice } from '@features/ai/services/aiInvoiceParser';
-import { generateFileHash } from '@/utils/hash';
+import { configurationService } from '@/services/config/configurationService';
 import { getOCRCache, saveOCRCache } from '@features/ai/services/ocrCache';
 import { applyLearning } from '@features/ai/services/learningService';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -249,11 +249,11 @@ export async function processInvoice(file: File | string): Promise<ParsedInvoice
   
   let text = getOCRCache(hash);
   const aiCacheKey = `pharmaflow_ai_cache_${hash}`;
-  const cachedAI = localStorage.getItem(aiCacheKey);
+  const cachedAI = configurationService.getSync<any>(aiCacheKey);
 
   if (cachedAI) {
     try {
-      const { data, timestamp } = JSON.parse(cachedAI);
+      const { data, timestamp } = cachedAI;
       if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
         return data;
       }
@@ -328,10 +328,10 @@ export async function processInvoice(file: File | string): Promise<ParsedInvoice
   }
 
   try {
-    localStorage.setItem(aiCacheKey, JSON.stringify({
+    configurationService.set(aiCacheKey, {
       data,
       timestamp: Date.now()
-    }));
+    }).catch(() => {});
   } catch (e) {
     // ignore quota issues
   }

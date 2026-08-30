@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal, Button } from '@/components/shared/SharedUI';
 import { db } from '@/core/db';
+import { WorkflowOrchestrator } from '@/core/workflow';
+import { productApplicationWorkflow } from '@features/catalog/workflows/ProductApplicationWorkflow';
 import { Package, Lock, TrendingUp, Box } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStore } from '@/hooks/useAppStore';
@@ -278,7 +280,7 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
         Is_Active: 1,
         created_at: new Date().toISOString()
       };
-      await db.products.put(newProd); 
+      await WorkflowOrchestrator.execute(productApplicationWorkflow, { product: newProd as any, isNew: true });
       finalProductId = newProd.id;
     }
 
@@ -315,7 +317,7 @@ export const ItemEntryModal: React.FC<ItemEntryModalProps> = ({
       Is_Active: 1, 
       created_at: new Date().toISOString() 
     };
-    await db.products.put(newProd);
+    await WorkflowOrchestrator.execute(productApplicationWorkflow, { product: newProd as any, isNew: true });
     
     onAdd({ 
       id: initialData?.id || Date.now().toString(), 

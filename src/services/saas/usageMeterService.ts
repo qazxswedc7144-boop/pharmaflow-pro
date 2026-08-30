@@ -6,6 +6,7 @@
  */
 
 import { db, getCurrentUserSession } from '@/core/db';
+import { configurationService } from '@/services/config/configurationService';
 
 export interface TenantUsageMetrics {
   tenantId: string;
@@ -105,11 +106,9 @@ export class UsageMeterService {
 
       // In QA / Developer Sandbox mode only, check if offset simulation is injected
       let simOffset = 0;
-      if (typeof window !== 'undefined') {
-        const isDev = Boolean(import.meta.env?.DEV || process.env.NODE_ENV !== 'production');
-        if (isDev) {
-          simOffset = parseInt(sessionStorage.getItem('saas_qa_test_offset') || '0', 10);
-        }
+      const isDev = Boolean(import.meta.env?.DEV || process.env.NODE_ENV !== 'production');
+      if (isDev) {
+        simOffset = parseInt(configurationService.getSync<string>('saas_qa_test_offset') || '0', 10);
       }
 
       const finalUsage = Math.max(0, totalActualUsage + simOffset);
@@ -167,9 +166,7 @@ export class UsageMeterService {
    * Clears QA test offsets (used for test resets)
    */
   static resetQaSimulation(): void {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('saas_qa_test_offset');
-    }
+    configurationService.delete('saas_qa_test_offset').catch(() => {});
     this.invalidate();
   }
 
@@ -177,9 +174,7 @@ export class UsageMeterService {
    * Sets QA test offset for QA / Dev review only
    */
   static setQaSimulationOffset(offset: number): void {
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('saas_qa_test_offset', String(offset));
-    }
+    configurationService.set('saas_qa_test_offset', String(offset)).catch(() => {});
     this.invalidate();
   }
 }

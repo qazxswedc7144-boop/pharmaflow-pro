@@ -1,6 +1,6 @@
 import { BusinessWorkflow, WorkflowContext } from '@/core/workflow';
 import { InvoiceItem, InvoiceStatus } from '@/types';
-import { SalesWorkflow, salesWorkflow } from '@features/sales/workflows/SalesWorkflow';
+import { salesWorkflow } from '@features/sales/workflows/SalesWorkflow';
 
 export interface SalesReturnInput {
   originalSaleId?: string;

@@ -38,12 +38,7 @@ export function getCurrentContext(overrideContext?: ConfigurationContext): Confi
   const session = TokenProvider.getCurrentSession();
   const user = session.user;
 
-  let deviceId = 'default-device';
-  if (typeof localStorage !== 'undefined') {
-    deviceId = localStorage.getItem('pharmaflow_device_id') ||
-               localStorage.getItem('erp_device_uuid') ||
-               'default-device';
-  }
+  let deviceId = session.deviceId || 'default-device';
 
   const defaultContext: ConfigurationContext = {
     tenantId: session.tenantId || user?.tenant_id || user?.tenantId || 'default-tenant',

@@ -6,6 +6,8 @@
 import { DeviceMetadata, SYNC_PROTOCOL_VERSION } from "./sync.types";
 import { getCurrentUserSession } from "@/core/db";
 import { TokenProvider } from "@/services/auth/tokenProvider";
+import { configurationService } from "@/services/config/configurationService";
+import { unifiedTransport } from "@/services/network/unifiedTransport";
 
 const DEVICE_STORAGE_KEY = "pharmaflow_device_identity";
 
@@ -27,24 +29,19 @@ export class DeviceManager {
       };
     }
 
-    if (typeof window !== "undefined" && window.localStorage) {
-      try {
-        const stored = localStorage.getItem(DEVICE_STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed && parsed.deviceId) {
-            this.cachedIdentity = {
-              ...parsed,
-              tenantId: session.tenantId || parsed.tenantId,
-              branchId: session.branchId || parsed.branchId,
-              userId: session.userId || parsed.userId
-            };
-            return this.cachedIdentity!;
-          }
-        }
-      } catch (err) {
-        console.warn("[DeviceManager] Error reading stored device identity:", err);
+    try {
+      const stored = configurationService.getSync<DeviceMetadata>(DEVICE_STORAGE_KEY);
+      if (stored && stored.deviceId) {
+        this.cachedIdentity = {
+          ...stored,
+          tenantId: session.tenantId || stored.tenantId,
+          branchId: session.branchId || stored.branchId,
+          userId: session.userId || stored.userId
+        };
+        return this.cachedIdentity!;
       }
+    } catch (err) {
+      console.warn("[DeviceManager] Error reading stored device identity:", err);
     }
 
     // Generate fresh persistent device ID
@@ -68,12 +65,10 @@ export class DeviceManager {
       lastSeenAt: new Date().toISOString()
     };
 
-    if (typeof window !== "undefined" && window.localStorage) {
-      try {
-        localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(identity));
-      } catch (err) {
-        console.warn("[DeviceManager] Error persisting device identity:", err);
-      }
+    try {
+      configurationService.set(DEVICE_STORAGE_KEY, identity).catch(() => {});
+    } catch (err) {
+      console.warn("[DeviceManager] Error persisting device identity:", err);
     }
 
     this.cachedIdentity = identity;
@@ -88,42 +83,28 @@ export class DeviceManager {
 
     const identity = this.getDeviceIdentity();
     const session = getCurrentUserSession();
-    const token = TokenProvider.getAccessToken() || "local-admin-token";
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch("/api/v1/sync/device/register", {
-        method: "POST",
+      const response = await unifiedTransport.post<any>("/api/v1/sync/device/register", {
+        deviceId: identity.deviceId,
+        deviceName: identity.deviceName,
+        branchId: session.branchId || "default-branch",
+        appVersion: "8.3.0",
+        schemaVersion: SYNC_PROTOCOL_VERSION
+      }, {
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
           "X-Tenant-ID": session.tenantId,
           "X-Branch-ID": session.branchId || "",
           "X-Device-ID": identity.deviceId
         },
-        body: JSON.stringify({
-          deviceId: identity.deviceId,
-          deviceName: identity.deviceName,
-          branchId: session.branchId || "default-branch",
-          appVersion: "8.3.0",
-          schemaVersion: SYNC_PROTOCOL_VERSION
-        }),
-        signal: controller.signal
+        timeoutMs: 10000
       });
 
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) {
-          identity.status = result.data.status || "ACTIVE";
-          if (typeof window !== "undefined" && window.localStorage) {
-            localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(identity));
-          }
-          return true;
-        }
+      const result = response.data;
+      if (result && result.success && result.data) {
+        identity.status = result.data.status || "ACTIVE";
+        configurationService.set(DEVICE_STORAGE_KEY, identity).catch(() => {});
+        return true;
       }
     } catch (err) {
       console.warn("[DeviceManager] Background device registration deferred:", err);

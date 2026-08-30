@@ -1,5 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import Dexie, { type Table, type Transaction } from 'dexie';
+import { TokenProvider } from '@/services/auth/tokenProvider';
+
+import { configurationService } from '@/services/config/configurationService';
 
 function ensureItemPrimaryKey(table: any, item: any) {
   if (!item || typeof item !== 'object') return item;
@@ -69,17 +72,16 @@ if (typeof Dexie !== 'undefined' && (Dexie as any).Table) {
 
 export function getCurrentUserSession() {
   try {
-    const stored = typeof window !== 'undefined' ? localStorage.getItem('pharmaflow_user') : null;
-    if (stored) {
-      const userObj = JSON.parse(stored);
+    const session = TokenProvider.getCurrentSession();
+    if (session?.user) {
       return {
-        tenantId: userObj?.tenantId || 'default-tenant',
-        branchId: userObj?.branchId || null,
-        userId: userObj?.id || 'default-user'
+        tenantId: session.tenantId || session.user.tenantId || session.user.tenant_id || 'default-tenant',
+        branchId: session.branchId || session.user.branchId || session.user.branch_id || null,
+        userId: session.userId || session.user.id || session.user.user_id || 'default-user'
       };
     }
   } catch (e) {
-    console.error('[DB] Error reading user session from localStorage:', e);
+    console.error('[DB] Error reading user session from TokenProvider:', e);
   }
   return {
     tenantId: 'default-tenant',
@@ -841,7 +843,7 @@ export class PharmaFlowDB extends Dexie {
   // --- PROTECTION HELPERS ---
   setBypassSecurity(status: boolean) {
     console.log(`[DB] Security Bypass: ${status}`);
-    sessionStorage.setItem('PHARMAFLOW_DB_BYPASS', status ? 'true' : 'false');
+    configurationService.set('PHARMAFLOW_DB_BYPASS', status ? 'true' : 'false').catch(() => {});
   }
 
   // --- CURRENCY HELPERS ---
