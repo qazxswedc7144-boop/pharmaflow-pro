@@ -12,6 +12,7 @@ import { PromptManager } from './PromptManager';
 import { aiContextBuilder } from './AIContextBuilder';
 import { AIResponseValidator } from './AIResponseValidator';
 import { AIUsageTracker } from './AIUsageTracker';
+import { unifiedTransport } from '@/shared/network/transport/unifiedTransport';
 
 export class GeminiGateway {
   private static DEFAULT_MODEL: AIModelTarget = 'gemini-3.6-flash';
@@ -303,22 +304,19 @@ export class GeminiGateway {
     }
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || this.DEFAULT_TIMEOUT_MS);
-
-      const res = await fetch('/api/ai/stream', {
+      const res = await unifiedTransport.request<Response>({
+        url: '/api/ai/stream',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        profile: 'AI',
+        raw: true,
+        body: {
           model,
           systemInstruction,
           prompt: finalPrompt,
           temperature: options.temperature ?? 0.2,
-        }),
-        signal: controller.signal,
+        },
+        timeoutMs: options.timeoutMs || this.DEFAULT_TIMEOUT_MS
       });
-
-      clearTimeout(timeoutId);
 
       if (!res.ok || !res.body) {
         return {
@@ -398,48 +396,11 @@ export class GeminiGateway {
     },
     timeoutMs: number
   ): Promise<{ text: string; usage?: { promptTokens: number; completionTokens: number } }> {
-    let lastError: any;
-
-    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-        const res = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          return await res.json();
-        }
-
-        const errorJson = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-        lastError = new Error(errorJson.message || `خطأ الخادم (HTTP ${res.status})`);
-
-        // If client error (4xx except 429), don't retry
-        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
-          throw lastError;
-        }
-      } catch (err: any) {
-        lastError = err;
-        if (err.name === 'AbortError') {
-          lastError = new Error('انتهت مهلة معالجة طلب الذكاء الاصطناعي (20 ثانية).');
-        }
-      }
-
-      // Exponential delay before retry (500ms, 1000ms, 2000ms)
-      if (attempt < this.MAX_RETRIES) {
-        const backoffMs = 500 * Math.pow(2, attempt - 1);
-        await new Promise((r) => setTimeout(r, backoffMs));
-      }
-    }
-
-    throw lastError || new Error('فشلت جميع محاولات الاتصال بخدمة الذكاء الاصطناعي.');
+    return await unifiedTransport.post<{ text: string; usage?: { promptTokens: number; completionTokens: number } }>(
+      '/api/ai/generate',
+      payload,
+      { profile: 'AI', timeoutMs, retries: this.MAX_RETRIES }
+    );
   }
 
   /**

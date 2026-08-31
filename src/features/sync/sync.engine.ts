@@ -12,6 +12,7 @@ import { getCurrentUserSession, db as defaultDb } from '@/core/db';
 import { TokenProvider } from '@/services/auth/tokenProvider';
 import { SyncLockManager } from './sync.lock';
 import { DeviceManager } from './device.manager';
+import { unifiedTransport } from '@/shared/network/transport/unifiedTransport';
 
 export type SyncEngineState = 
   | 'IDLE' 
@@ -365,38 +366,27 @@ export class DistributedSyncEngine {
       const device = DeviceManager.getDeviceIdentity();
 
       const executePullFetch = async (): Promise<Response> => {
-        const authHeaders = TokenProvider.getAuthHeaders();
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-        try {
-          const res = await fetch(this.getApiUrl('/api/v1/sync/pull'), {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              ...authHeaders,
-              'X-Tenant-ID': session.tenantId,
-              'X-Branch-ID': session.branchId || '',
-              'X-User-ID': session.userId,
-              'X-Device-ID': device.deviceId
-            },
-            body: JSON.stringify({ 
-              tenantId: session.tenantId,
-              branchId: session.branchId,
-              userId: session.userId,
-              deviceId: device.deviceId,
-              cursor: this.lastPulledCursor,
-              lastSyncTimestamp: this.lastSyncTimestamp,
-              schemaVersion: SYNC_PROTOCOL_VERSION
-            }),
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          return res;
-        } catch (err) {
-          clearTimeout(timeoutId);
-          throw err;
-        }
+        return await unifiedTransport.request<Response>({
+          url: this.getApiUrl('/api/v1/sync/pull'),
+          method: 'POST',
+          profile: 'SYNC',
+          raw: true,
+          headers: { 
+            'X-Tenant-ID': session.tenantId,
+            'X-Branch-ID': session.branchId || '',
+            'X-User-ID': session.userId,
+            'X-Device-ID': device.deviceId
+          },
+          body: { 
+            tenantId: session.tenantId,
+            branchId: session.branchId,
+            userId: session.userId,
+            deviceId: device.deviceId,
+            cursor: this.lastPulledCursor,
+            lastSyncTimestamp: this.lastSyncTimestamp,
+            schemaVersion: SYNC_PROTOCOL_VERSION
+          }
+        });
       };
 
       let response = await executePullFetch();
@@ -562,45 +552,34 @@ export class DistributedSyncEngine {
       await (this.db as any).outbox.update(event.id, { status: 'SENDING', updatedAt: new Date().toISOString() });
       
       const sendPushRequest = async (): Promise<Response> => {
-        const authHeaders = TokenProvider.getAuthHeaders();
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-        try {
-          const res = await fetch(this.getApiUrl('/api/v1/sync/push'), {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              ...authHeaders,
-              'X-Tenant-ID': event.tenantId || session.tenantId,
-              'X-Branch-ID': event.branchId || session.branchId || '',
-              'X-User-ID': session.userId,
-              'X-Device-ID': device.deviceId
-            },
-            body: JSON.stringify({
-              tenantId: event.tenantId || session.tenantId,
-              branchId: event.branchId || session.branchId,
-              userId: session.userId,
-              deviceId: device.deviceId,
-              schemaVersion: SYNC_PROTOCOL_VERSION,
-              clientVersion: CLIENT_VERSION,
-              mutations: [{
-                id: event.mutationId || String(event.id),
-                entity: event.entityType || event.type || 'MUTATION',
-                operation: event.operation || 'CREATE',
-                payload: event.payload || {},
-                idempotencyKey: event.idempotencyKey || event.mutationId || String(event.id),
-                timestamp: event.createdAt || Date.now()
-              }]
-            }),
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          return res;
-        } catch (err) {
-          clearTimeout(timeoutId);
-          throw err;
-        }
+        return await unifiedTransport.request<Response>({
+          url: this.getApiUrl('/api/v1/sync/push'),
+          method: 'POST',
+          profile: 'SYNC',
+          raw: true,
+          headers: { 
+            'X-Tenant-ID': event.tenantId || session.tenantId,
+            'X-Branch-ID': event.branchId || session.branchId || '',
+            'X-User-ID': session.userId,
+            'X-Device-ID': device.deviceId
+          },
+          body: {
+            tenantId: event.tenantId || session.tenantId,
+            branchId: event.branchId || session.branchId,
+            userId: session.userId,
+            deviceId: device.deviceId,
+            schemaVersion: SYNC_PROTOCOL_VERSION,
+            clientVersion: CLIENT_VERSION,
+            mutations: [{
+              id: event.mutationId || String(event.id),
+              entity: event.entityType || event.type || 'MUTATION',
+              operation: event.operation || 'CREATE',
+              payload: event.payload || {},
+              idempotencyKey: event.idempotencyKey || event.mutationId || String(event.id),
+              timestamp: event.createdAt || Date.now()
+            }]
+          }
+        });
       };
 
       let response = await sendPushRequest();
@@ -648,48 +627,37 @@ export class DistributedSyncEngine {
     const device = DeviceManager.getDeviceIdentity();
 
     const sendPushMutation = async (): Promise<Response> => {
-      const authHeaders = TokenProvider.getAuthHeaders();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-      try {
-        const res = await fetch(this.getApiUrl('/api/v1/sync/push'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...authHeaders,
-            'X-Tenant-ID': mutation.tenantId || session.tenantId,
-            'X-Branch-ID': mutation.branchId || session.branchId || '',
-            'X-User-ID': session.userId,
-            'X-Device-ID': device.deviceId,
-            'X-Session-ID': (mutation as any).sessionId || 'local-session',
-            'X-Correlation-ID': mutation.correlationId || 'local-correlation',
-          },
-          body: JSON.stringify({
-            tenantId: mutation.tenantId || session.tenantId,
-            branchId: mutation.branchId || session.branchId,
-            userId: session.userId,
-            deviceId: device.deviceId,
-            schemaVersion: SYNC_PROTOCOL_VERSION,
-            clientVersion: CLIENT_VERSION,
-            mutations: [{
-              id: mutation.mutationId,
-              entity: mutation.entityType || 'MUTATION',
-              operation: mutation.operationType || 'CREATE',
-              payload: mutation.payload,
-              idempotencyKey: mutation.idempotencyKey || mutation.mutationId,
-              version: mutation.version || 1,
-              timestamp: mutation.createdAt
-            }]
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        return res;
-      } catch (err) {
-        clearTimeout(timeoutId);
-        throw err;
-      }
+      return await unifiedTransport.request<Response>({
+        url: this.getApiUrl('/api/v1/sync/push'),
+        method: 'POST',
+        profile: 'SYNC',
+        raw: true,
+        headers: {
+          'X-Tenant-ID': mutation.tenantId || session.tenantId,
+          'X-Branch-ID': mutation.branchId || session.branchId || '',
+          'X-User-ID': session.userId,
+          'X-Device-ID': device.deviceId,
+          'X-Session-ID': (mutation as any).sessionId || 'local-session',
+          'X-Correlation-ID': mutation.correlationId || 'local-correlation',
+        },
+        body: {
+          tenantId: mutation.tenantId || session.tenantId,
+          branchId: mutation.branchId || session.branchId,
+          userId: session.userId,
+          deviceId: device.deviceId,
+          schemaVersion: SYNC_PROTOCOL_VERSION,
+          clientVersion: CLIENT_VERSION,
+          mutations: [{
+            id: mutation.mutationId,
+            entity: mutation.entityType || 'MUTATION',
+            operation: mutation.operationType || 'CREATE',
+            payload: mutation.payload,
+            idempotencyKey: mutation.idempotencyKey || mutation.mutationId,
+            version: mutation.version || 1,
+            timestamp: mutation.createdAt
+          }]
+        }
+      });
     };
     
     while (mutation.retryCount <= SYNC_CONFIG.MAX_RETRY_ATTEMPTS) {

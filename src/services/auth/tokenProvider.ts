@@ -1,5 +1,4 @@
 // src/services/auth/tokenProvider.ts
-import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import { User, AuthSession, AuthHeaders, TenantAuthContext } from '@/types/auth.types';
 
@@ -173,18 +172,23 @@ export class TokenProvider {
       }
 
       try {
-        const response = await axios.post('/api/auth/refresh', { 
-          refreshToken: currentRefresh 
-        }, { 
-          timeout: 10000 
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        const data = response.data || {};
+        const response = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: currentRefresh }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const data = (await response.json().catch(() => ({}))) || {};
         const newAccess = data.accessToken || data.token;
         const newRefresh = data.refreshToken || currentRefresh;
         const newUser = data.user || useAuthStore.getState().user;
 
-        if (!newAccess) {
+        if (!response.ok || !newAccess) {
           throw new Error('INVALID_REFRESH_PAYLOAD');
         }
 
@@ -192,10 +196,9 @@ export class TokenProvider {
         return newAccess;
       } catch (err: any) {
         const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-        const isNetworkErr = err.code === 'ERR_NETWORK' || 
+        const isNetworkErr = err.name === 'AbortError' ||
           err.message?.includes('Network Error') || 
-          err.message?.includes('Failed to fetch') ||
-          err.name === 'AxiosError' && !err.response;
+          err.message?.includes('Failed to fetch');
 
         if (isOffline || isNetworkErr) {
           console.warn('📶 [TokenProvider] Network unavailable during refresh. Preserving offline session.');
@@ -228,10 +231,18 @@ export class TokenProvider {
 
     if (revokeOnServer && currentRefresh && typeof navigator !== 'undefined' && navigator.onLine) {
       try {
-        await axios.post('/api/auth/logout', { refreshToken: currentRefresh }, {
-          headers: this.getAuthHeaders(),
-          timeout: 5000
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...this.getAuthHeaders()
+          },
+          body: JSON.stringify({ refreshToken: currentRefresh }),
+          signal: controller.signal
         }).catch(() => {});
+        clearTimeout(timeoutId);
       } catch {
         // Safe ignore
       }

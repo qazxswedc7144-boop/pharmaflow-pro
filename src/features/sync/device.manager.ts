@@ -5,9 +5,8 @@
 
 import { DeviceMetadata, SYNC_PROTOCOL_VERSION } from "./sync.types";
 import { getCurrentUserSession } from "@/core/db";
-import { TokenProvider } from "@/services/auth/tokenProvider";
 import { configurationService } from "@/services/config/configurationService";
-import { unifiedTransport } from "@/services/network/unifiedTransport";
+import { unifiedTransport } from "@/shared/network/transport/unifiedTransport";
 
 const DEVICE_STORAGE_KEY = "pharmaflow_device_identity";
 

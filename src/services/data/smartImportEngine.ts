@@ -244,6 +244,13 @@ async function extractTextFromPDF(file: File): Promise<string> {
   return fullText;
 }
 
+async function generateFileHash(file: File | string): Promise<string> {
+  if (typeof file === 'string') {
+    return file.slice(0, 32);
+  }
+  return `${file.name}_${file.size}_${file.lastModified}`;
+}
+
 export async function processInvoice(file: File | string): Promise<ParsedInvoice> {
   const hash = await generateFileHash(file);
   

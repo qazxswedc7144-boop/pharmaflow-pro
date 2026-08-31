@@ -255,6 +255,10 @@ export class UnifiedTransport implements Transport {
           continue;
         }
 
+        if (config.raw) {
+          return response as unknown as T;
+        }
+
         // Parse Response Body
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {

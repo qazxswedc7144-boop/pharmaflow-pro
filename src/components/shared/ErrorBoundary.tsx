@@ -37,7 +37,7 @@ class ErrorBoundary extends React.Component<Props, State> {
     // Fix: Accessing setState member of React Component instance using any casting to resolve Property does not exist error (Error line 36)
     (this as any).setState({ errorInfo });
     
-    observabilityService.recordError(error, { feature: 'REACT_ERROR_BOUNDARY' }, 'UI', 'CRITICAL').catch(() => {});
+    observabilityService.recordError(error, { feature: 'REACT_ERROR_BOUNDARY' }, 'UNKNOWN', 'CRITICAL').catch(() => {});
     configurationService.set('last_critical_error', {
       message: error.message,
       time: new Date().toISOString()

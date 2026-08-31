@@ -32,6 +32,7 @@ export interface AuthSession {
   refreshToken: string | null;
   tenantId: string | null;
   branchId: string | null;
+  deviceId?: string | null;
   roles: string[];
   permissions: string[];
   subscriptionPlan: string | null;

@@ -4,7 +4,7 @@ import { integrityVerifier } from '@/services/integrity/integrityVerifier';
 import { eventBus, EVENTS } from '@/services/eventBus';
 import { Card, Button, Badge } from '@/components/shared/SharedUI';
 import { configurationService } from '@/services/config/configurationService';
-import { unifiedTransport } from '@/services/network/unifiedTransport';
+import { unifiedTransport } from '@/shared/network/transport/unifiedTransport';
 import { 
   ShieldCheck, Activity, AlertCircle, CheckCircle2, RefreshCw, 
   Smartphone, Database, Wifi, Lock, DownloadCloud, UploadCloud, 

@@ -176,9 +176,8 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
    */
   const handleSeedPlans = async () => {
     try {
-      const res = await fetch('/api/saas/seed-plans', { method: 'POST' });
-      const data = await res.json();
-      NotificationService.success(data.message || "تم دفق الخطط الأربعة بنجاح!");
+      const data: any = await unifiedTransport.post('/api/saas/seed-plans');
+      NotificationService.success(data?.message || "تم دفق الخطط الأربعة بنجاح!");
       fetchPlatformMetrics();
     } catch (err: any) {
       NotificationService.error("فشل تحديث خطط الاشتراك بالخادم: " + err.message);
@@ -200,22 +199,15 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
     setRegistrationSuccessData(null);
 
     try {
-      const response = await fetch('/api/saas/register-tenant', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          username: regUsername,
-          password: regPassword,
-          tenantName: regTenantName,
-          branchName: regBranchName || "الفرع الرئيسي",
-          planCode: regPlan
-        })
+      const resData: any = await unifiedTransport.post('/api/saas/register-tenant', {
+        username: regUsername,
+        password: regPassword,
+        tenantName: regTenantName,
+        branchName: regBranchName || "الفرع الرئيسي",
+        planCode: regPlan
       });
 
-      const resData = await response.json();
-      if (resData.success) {
+      if (resData && resData.success) {
         setRegistrationSuccessData(resData.data);
         // Clear fields
         setRegUsername('');
@@ -225,7 +217,7 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
         // Refresh metrics
         fetchPlatformMetrics();
       } else {
-        setRegistrationError(resData.message || "حدث خطأ أثناء معالجة تسجيل المؤسسة.");
+        setRegistrationError(resData?.message || "حدث خطأ أثناء معالجة تسجيل المؤسسة.");
       }
     } catch (err: any) {
       console.error(err);
@@ -505,11 +497,10 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
                 <span className="text-sm font-black text-slate-700 dark:text-white mt-1">BASIC / ACTIVE</span>
                 <button 
                   onClick={async () => {
-                    await fetch('/api/saas/seed-plans', { method: 'POST' });
+                    await unifiedTransport.post('/api/saas/seed-plans');
                     // Increment and refresh
-                    const res = await fetch(`/api/saas/subscription-status/${tenantId}`);
-                    const d = await res.json();
-                    if (d.success) setSubLimitData(d);
+                    const d: any = await unifiedTransport.get(`/api/saas/subscription-status/${tenantId}`);
+                    if (d?.success) setSubLimitData(d);
                     NotificationService.success("تم تنشيط رخصة الاشتراك وتعديل الأرصدة التراكمية.");
                   }}
                   className="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[10px] px-3 py-1 rounded-lg transition"

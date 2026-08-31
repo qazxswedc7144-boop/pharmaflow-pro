@@ -103,7 +103,7 @@ export class ConfigurationRepository {
       updatedAt: new Date().toISOString()
     };
 
-    await db.transaction('rw', db.settings, async () => {
+    await db.transaction('rw', 'settings', async () => {
       // 1. Save scoped record
       await db.settings.put({
         key: storageKey,
@@ -129,7 +129,7 @@ export class ConfigurationRepository {
     const canonicalKey = normalizeConfigKey(key);
     const storageKey = buildScopedStorageKey(canonicalKey, scope, context);
 
-    await db.transaction('rw', db.settings, async () => {
+    await db.transaction('rw', 'settings', async () => {
       await db.settings.delete(storageKey);
       await db.settings.delete(canonicalKey);
     });

@@ -32,19 +32,31 @@ export class ConfigurationService {
 
     this.initPromise = (async () => {
       try {
-        // 1. Run safe idempotent legacy storage migration
-        await runLegacySettingsMigration();
+        // 1. Run safe idempotent legacy storage migration with 1000ms timeout max
+        await Promise.race([
+          runLegacySettingsMigration(),
+          new Promise((res) => setTimeout(res, 1000))
+        ]);
 
-        // 2. Load all records into reactive memory cache
-        const allRecords = await configurationRepository.getAllRecords();
+        // 2. Load all records into reactive memory cache with 1000ms timeout max
+        const allRecords = await Promise.race([
+          configurationRepository.getAllRecords(),
+          new Promise<ConfigurationRecord<any>[]>((res) => setTimeout(() => res([]), 1000))
+        ]);
+
         this.cache.clear();
-        for (const record of allRecords) {
-          this.cache.set(normalizeConfigKey(record.key), record);
+        if (Array.isArray(allRecords)) {
+          for (const record of allRecords) {
+            if (record && record.key) {
+              this.cache.set(normalizeConfigKey(record.key), record);
+            }
+          }
         }
 
         this.isInitialized = true;
       } catch (err) {
         console.error('[ConfigurationService] Failed to initialize:', err);
+        this.isInitialized = true;
       } finally {
         this.initPromise = null;
       }
@@ -206,6 +218,16 @@ export class ConfigurationService {
 
     await configurationRepository.deleteRecord(canonicalKey, scope, context);
     this.cache.delete(canonicalKey);
+  }
+
+  /**
+   * Alias for remove() to delete a key.
+   */
+  public async delete(
+    key: string,
+    overrideContext?: ConfigurationContext
+  ): Promise<void> {
+    return this.remove(key, overrideContext);
   }
 
   /**

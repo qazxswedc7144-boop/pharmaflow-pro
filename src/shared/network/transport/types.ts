@@ -40,6 +40,7 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
   userId?: string;
   deviceId?: string;
   signal?: AbortSignal;
+  raw?: boolean;
 }
 
 export interface RequestConfig extends RequestOptions {

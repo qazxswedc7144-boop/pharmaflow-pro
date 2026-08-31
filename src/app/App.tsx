@@ -256,15 +256,31 @@ function MainLayout() {
   // Task 4: Optimized and re-engineered ultra-fast main startup boot sequence
   useEffect(() => {
     const startBootTime = performance.now();
+    let isComponentMounted = true;
+
+    // Safety Gate: Ensure ready state becomes true after 1200ms max under all network/storage conditions
+    const safetyTimer = setTimeout(() => {
+      if (isComponentMounted) {
+        console.warn("⚡ [BOOT_SEQUENCE] Safety timer triggered (1200ms). Forcing system readiness.");
+        setIsReady(true);
+      }
+    }, 1200);
+
     const bootFlow = async () => {
       try {
-        // Ensure local IndexedDB is initialized
+        // Ensure local IndexedDB is initialized with 800ms max timeout
         if (!db.isOpen()) {
-          await db.open();
+          await Promise.race([
+            db.open(),
+            new Promise((res) => setTimeout(res, 800))
+          ]);
         }
         
-        // 1. Immediately query the Dexie systemSettings table to resolve the status of authenticationEnabled
-        const item = await db.systemSettings.get('authenticationEnabled');
+        // 1. Query the Dexie systemSettings table to resolve the status of authenticationEnabled with timeout
+        const item = await Promise.race([
+          db.systemSettings.get('authenticationEnabled').catch(() => null),
+          new Promise<null>((res) => setTimeout(() => res(null), 500))
+        ]);
         const authEnabled = item ? item.value === true : false;
         
         // Align auth enabled flag in configurationService so components can pull it synchronously
@@ -319,9 +335,12 @@ function MainLayout() {
               window.location.hash = '#/dashboard';
             }
           } else if (session.refreshToken && typeof navigator !== 'undefined' && navigator.onLine) {
-            // Attempt single-flight session restoration via refresh token
+            // Attempt single-flight session restoration via refresh token with 800ms timeout
             try {
-              await TokenProvider.refreshAccessToken();
+              await Promise.race([
+                TokenProvider.refreshAccessToken(),
+                new Promise((_, rej) => setTimeout(() => rej(new Error("Refresh timeout")), 800))
+              ]);
               const currentHash = window.location.hash;
               if (currentHash === '#/login' || !currentHash) {
                 window.location.hash = '#/dashboard';
@@ -339,14 +358,21 @@ function MainLayout() {
       } catch (err) {
         console.error("⚡ [BOOT_SEQUENCE] Snappy verification pipeline failed, falling back safely:", err);
       } finally {
+        clearTimeout(safetyTimer);
         const bootDuration = performance.now() - startBootTime;
-        console.log(`⚡ [BOOT_SEQUENCE] Snappy startup boot completed in ${bootDuration.toFixed(1)}ms (KPI limit: 300ms).`);
-        // 4. PERFORMANCE KPI: Ensure ready state becomes true instantly
-        setIsReady(true);
+        console.log(`⚡ [BOOT_SEQUENCE] Snappy startup boot completed in ${bootDuration.toFixed(1)}ms.`);
+        if (isComponentMounted) {
+          setIsReady(true);
+        }
       }
     };
     
     bootFlow();
+
+    return () => {
+      isComponentMounted = false;
+      clearTimeout(safetyTimer);
+    };
   }, []);
 
 

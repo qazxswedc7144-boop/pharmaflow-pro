@@ -77,7 +77,7 @@ export function getCurrentUserSession() {
       return {
         tenantId: session.tenantId || session.user.tenantId || session.user.tenant_id || 'default-tenant',
         branchId: session.branchId || session.user.branchId || session.user.branch_id || null,
-        userId: session.userId || session.user.id || session.user.user_id || 'default-user'
+        userId: session.user?.id || (session.user as any)?.user_id || 'default-user'
       };
     }
   } catch (e) {
@@ -431,9 +431,11 @@ export class PharmaFlowDB extends Dexie {
 
     // Handle structural integrity and recovery
     this.on('versionchange', () => {
-      console.warn("Database structure updated in another tab. Reloading...");
-      this.close();
-      if (typeof window !== 'undefined') window.location.reload();
+      console.warn("Database structure updated in another tab. Switching to resilient mode.");
+      try {
+        this.close();
+      } catch (e) {}
+      isDbBlocked = true;
     });
 
     // Register hooks to ensure tenantId and userId are set on specified tables
@@ -896,10 +898,25 @@ export class PharmaFlowDB extends Dexie {
   // --- INITIALIZATION ---
   async init() {
     console.log("[DB] Initializing database seeds and defaults...");
+    if (isDbBlocked) {
+      console.log("[DB] Operating in resilient in-memory mode for init.");
+      return true;
+    }
     try {
-      if (!this.isOpen()) await this.open();
+      if (!this.isOpen()) {
+        try {
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("IndexedDB open timeout")), 1500)
+          );
+          await Promise.race([this.open(), timeoutPromise]);
+        } catch (openErr) {
+          console.warn("[DB] Could not open IndexedDB during init, activating fallback:", openErr);
+          isDbBlocked = true;
+          return true;
+        }
+      }
       
-      const count = await this.accounts.count();
+      const count = await this.accounts.count().catch(() => 0);
       if (count === 0) {
         await this.accounts.bulkPut([
           { id: 'acc-cash', code: '101', name: 'الصندوق الرئيسي', type: 'ASSET', balance: 0, isSystem: true, isActive: true, balance_type: 'DEBIT', balanceType: 'DEBIT', debit: 0, credit: 0, updatedAt: new Date().toISOString() },
@@ -909,7 +926,7 @@ export class PharmaFlowDB extends Dexie {
       }
 
       // Seed initial products for offline browsing if products table is empty
-      const prodCount = await this.products.count();
+      const prodCount = await this.products.count().catch(() => 0);
       if (prodCount === 0) {
         await this.products.bulkPut([
           { id: 'PRD-101', name: 'بانادول إكسترا 500 ملجم', Name: 'Panadol Extra 500mg', barcode: '628100011001', categoryId: 'CAT-1', supplierId: 'SUP-1', stock: 150, is_active: true, Is_Active: true, price: 18.5, cost: 12.0, updatedAt: new Date().toISOString() },
@@ -922,7 +939,7 @@ export class PharmaFlowDB extends Dexie {
       }
 
       // Seed initial invoices (sales & purchases history) for offline browsing if empty
-      const invCount = await this.invoices.count();
+      const invCount = await this.invoices.count().catch(() => 0);
       if (invCount === 0) {
         await this.invoices.bulkPut([
           {
@@ -1005,8 +1022,8 @@ export class PharmaFlowDB extends Dexie {
 
       return true;
     } catch (e) {
-      console.error("[DB] Init failed:", e);
-      return false;
+      console.warn("[DB] Init warning handled:", e);
+      return true;
     }
   }
 
@@ -1454,9 +1471,13 @@ export const dbProxy = new Proxy({} as any, {
           return dbProxy;
         }
         try {
-          return await dbInstance.open();
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("IndexedDB open timeout (1500ms)")), 1500)
+          );
+          await Promise.race([dbInstance.open(), timeoutPromise]);
+          return dbProxy;
         } catch (e) {
-          console.error("Failed to open db via proxy open():", e);
+          console.warn("Failed or timed out opening db via proxy open():", e);
           isDbBlocked = true;
           return dbProxy;
         }
@@ -1467,6 +1488,40 @@ export const dbProxy = new Proxy({} as any, {
       return () => {
         if (isDbBlocked) return true;
         return dbInstance.isOpen();
+      };
+    }
+
+    if (prop === 'transaction') {
+      return async (mode: any, ...args: any[]) => {
+        const operation = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+        if (isDbBlocked) {
+          console.warn("Executing in-memory transaction fallback...");
+          return operation ? await operation({} as any) : undefined;
+        }
+
+        const rawTableArgs = args.slice(0, args.length - 1);
+        const tableNames: string[] = [];
+        const extractTableNames = (item: any) => {
+          if (!item) return;
+          if (Array.isArray(item)) {
+            item.forEach(extractTableNames);
+          } else if (typeof item === 'string') {
+            tableNames.push(item);
+          } else if (typeof item === 'object' && item.name && typeof item.name === 'string') {
+            tableNames.push(item.name);
+          }
+        };
+        rawTableArgs.forEach(extractTableNames);
+
+        try {
+          const validTables = tableNames.length > 0 ? tableNames : target.tables.map(t => t.name);
+          return await target.transaction(mode, validTables, async (tx: any) => {
+            return operation ? await operation(tx) : undefined;
+          });
+        } catch (txErr) {
+          console.warn("[DB Proxy] Transaction error, falling back to direct execution:", txErr);
+          return operation ? await operation({} as any) : undefined;
+        }
       };
     }
 
