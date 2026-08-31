@@ -14,7 +14,8 @@
  */
 
 import { UsageMeterService } from './usageMeterService';
-import { getCurrentUserSession, db } from '@/core/db';
+import { getCurrentUserSession } from '@/core/db';
+import { configurationService } from '@/services/config/configurationService';
 import { useUIStore } from '@/store/useUIStore';
 
 export type SubscriptionPlanCode = 'TRIAL' | 'BASIC' | 'BUSINESS' | 'ENTERPRISE';
@@ -72,14 +73,14 @@ export class SubscriptionEntitlementService {
     let startsAt = '2026-01-01T00:00:00.000Z';
     
     try {
-      const settingRecord = await db.settings.get(`tenant_license_${activeTenant}`).catch(() => null);
-      if (settingRecord && settingRecord.value) {
-        const val = settingRecord.value;
-        if (['TRIAL', 'BASIC', 'BUSINESS', 'ENTERPRISE'].includes(val.plan)) {
+      const settingRecord = await configurationService.get<any>(`tenant_license_${activeTenant}`).catch(() => null);
+      if (settingRecord) {
+        const val = typeof settingRecord === 'object' && settingRecord.value ? settingRecord.value : settingRecord;
+        if (val && ['TRIAL', 'BASIC', 'BUSINESS', 'ENTERPRISE'].includes(val.plan)) {
           verifiedPlan = val.plan;
         }
-        if (val.expiresAt) verifiedExpiry = val.expiresAt;
-        if (val.startsAt) startsAt = val.startsAt;
+        if (val && val.expiresAt) verifiedExpiry = val.expiresAt;
+        if (val && val.startsAt) startsAt = val.startsAt;
       }
     } catch {
       // Fall back to TRIAL
@@ -261,14 +262,11 @@ export class SubscriptionEntitlementService {
     startsAt?: string;
     expiresAt?: string;
   }): Promise<void> {
-    await db.settings.put({
-      key: `tenant_license_${license.tenantId}`,
-      value: {
-        plan: license.plan,
-        startsAt: license.startsAt || new Date().toISOString(),
-        expiresAt: license.expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-        updatedAt: new Date().toISOString()
-      }
+    await configurationService.set(`tenant_license_${license.tenantId}`, {
+      plan: license.plan,
+      startsAt: license.startsAt || new Date().toISOString(),
+      expiresAt: license.expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date().toISOString()
     });
     UsageMeterService.invalidate(license.tenantId);
   }

@@ -1,5 +1,6 @@
 
 import { db } from '@/core/db';
+import { configurationService } from '@/services/config/configurationService';
 import { AccountingEntry, JournalLine, Sale, Purchase, InvoiceItem, UnifiedInvoice } from '@/types';
 import { CurrencyService } from '@/services/localization/CurrencyService';
 import { AccountingError } from '@/core/errors';
@@ -33,10 +34,10 @@ export class AccountingEngine {
 
   static async getCoreAccount(type: 'CASH' | 'BANK' | 'RECEIVABLE' | 'PAYABLE' | 'INVENTORY' | 'SALES_REVENUE' | 'COGS' | 'EXPENSE'): Promise<string> {
     try {
-      const setting = await db.settings.get(`ACCOUNT_${type}`);
-      if (setting) return setting.value;
+      const setting = await configurationService.get<any>(`ACCOUNT_${type}`);
+      if (setting) return typeof setting === 'string' ? setting : setting.value || setting;
     } catch (e) {
-      console.warn(`Error fetching ACCOUNT_${type} from Dexie:`, e);
+      console.warn(`Error fetching ACCOUNT_${type} from configurationService:`, e);
     }
 
     // Fallback to defaults if not configured

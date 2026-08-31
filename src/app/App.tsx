@@ -276,12 +276,12 @@ function MainLayout() {
           ]);
         }
         
-        // 1. Query the Dexie systemSettings table to resolve the status of authenticationEnabled with timeout
+        // 1. Query configurationService to resolve the status of authenticationEnabled with timeout
         const item = await Promise.race([
-          db.systemSettings.get('authenticationEnabled').catch(() => null),
+          configurationService.get<boolean>('authenticationEnabled').catch(() => null),
           new Promise<null>((res) => setTimeout(() => res(null), 500))
         ]);
-        const authEnabled = item ? item.value === true : false;
+        const authEnabled = item === true || (typeof item === 'object' && (item as any)?.value === true);
         
         // Align auth enabled flag in configurationService so components can pull it synchronously
         configurationService.set('pharmaflow_auth_enabled', authEnabled ? 'true' : 'false').catch(() => {});
@@ -399,9 +399,9 @@ function MainLayout() {
     useEffect(() => {
       const checkLock = async () => {
         try {
-          // Check autoLockEnabled from Dexie systemSettings
-          const alItem = await db.systemSettings.get('autoLockEnabled');
-          const isAutoLockEnabled = alItem !== undefined ? alItem.value === true : false;
+          // Check autoLockEnabled from configurationService
+          const alItem = await configurationService.get<boolean>('autoLockEnabled').catch(() => null);
+          const isAutoLockEnabled = alItem === true || (typeof alItem === 'object' && (alItem as any)?.value === true);
 
           if (isAutoLockEnabled) {
             const settings = await appLockService.getSettings();
@@ -428,8 +428,8 @@ function MainLayout() {
               if (settings.lock_mode === 'instant') {
                 setIsLocked(true);
               } else {
-                const alItem = await db.systemSettings.get('autoLockEnabled');
-                const isAutoLockEnabled = alItem !== undefined ? alItem.value === true : false;
+                const alItem = await configurationService.get<boolean>('autoLockEnabled').catch(() => null);
+                const isAutoLockEnabled = alItem === true || (typeof alItem === 'object' && (alItem as any)?.value === true);
                 if (isAutoLockEnabled) {
                   const shouldLock = await appLockService.shouldLock();
                   if (shouldLock) setIsLocked(true);
@@ -463,9 +463,9 @@ function MainLayout() {
       // Initial check on mount (App Resume)
       const initialCheck = async () => {
         try {
-          // Check lockOnStartup from Dexie systemSettings
-          const losItem = await db.systemSettings.get('lockOnStartup');
-          const isLockOnStartupEnabled = losItem !== undefined ? losItem.value === true : false;
+          // Check lockOnStartup from configurationService
+          const losItem = await configurationService.get<boolean>('lockOnStartup').catch(() => null);
+          const isLockOnStartupEnabled = losItem === true || (typeof losItem === 'object' && (losItem as any)?.value === true);
 
           if (isLockOnStartupEnabled) {
             setIsLocked(true);
@@ -482,8 +482,8 @@ function MainLayout() {
 
           const settings = await appLockService.getSettings();
           if (settings?.is_enabled) {
-            const alItem = await db.systemSettings.get('autoLockEnabled');
-            const isAutoLockEnabled = alItem !== undefined ? alItem.value === true : false;
+            const alItem = await configurationService.get<boolean>('autoLockEnabled').catch(() => null);
+            const isAutoLockEnabled = alItem === true || (typeof alItem === 'object' && (alItem as any)?.value === true);
             if (isAutoLockEnabled) {
               const shouldLock = await appLockService.shouldLock();
               if (shouldLock) setIsLocked(true);

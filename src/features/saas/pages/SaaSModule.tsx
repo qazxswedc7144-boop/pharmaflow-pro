@@ -14,6 +14,7 @@ import { ApiGatewayService, ApiKeyConfig } from '../api/apiGateway';
 import { ReviewerSaaSTester } from '@features/saas/components/SubscriptionWidgets';
 import { NotificationService } from '@/context/NotificationContext';
 import { unifiedTransport } from '@/shared/network/transport/unifiedTransport';
+import { observabilityService } from '@/core/observability/observabilityService';
 
 interface SaaSModuleProps {
   onNavigate?: (view: string) => void;
@@ -329,15 +330,11 @@ export default function SaaSModule({ onNavigate: _onNavigate }: SaaSModuleProps)
 
     // Save success audit log
     try {
-      await db.Audit_Log.add({
-        id: db.generateId('LOG'),
-        action: 'CLOUD_SYNC',
-        user_id: 'SYSTEM_SaaS',
-        userName: 'مشرف السحابة',
-        target_id: tenantId,
-        target_type: 'TENANT',
-        timestamp: new Date().toISOString(),
-        details: `مزامنة سحابية تامة مشفرة من أطراف ثنائية بالتوقيع المشفر. حجم السجلات: ${stats.products + stats.sales}`
+      await observabilityService.record({
+        type: 'HEALTH',
+        subsystem: 'sync',
+        status: 'HEALTHY',
+        details: { message: `مزامنة سحابية تامة مشفرة من أطراف ثنائية بالتوقيع المشفر. حجم السجلات: ${stats.products + stats.sales}`, feature: 'CLOUD_SYNC', tenantId }
       });
     } catch(err) {}
   };
