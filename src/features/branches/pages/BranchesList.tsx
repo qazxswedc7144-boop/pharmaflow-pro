@@ -1,101 +1,120 @@
-// src/modules/branches/pages/BranchesList.tsx
+// src/features/branches/pages/BranchesList.tsx
 
-import React, { useState, useEffect } from 'react';
-import { BranchService } from '../services/BranchService';
-import { Branch, BranchSettings } from '@/types';
-import { useUI } from '@/contexts/AppContext';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Building2, MapPin, Phone, SlidersHorizontal, 
-  Plus, Search, Edit2, RotateCw
+  Plus, Search, Edit2, RotateCw, ArrowLeftRight, 
+  Activity, UserCheck, Clock, CheckCircle2, 
+  AlertTriangle, Wifi, ShieldCheck
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
+import { Branch, BranchMetrics } from '@/types';
+import { BranchService } from '../services/BranchService';
+import { useUI } from '@/contexts/AppContext';
 import { BackButton } from '@/components/shared/BackButton';
+import { 
+  BranchFormModal, 
+  BranchSettingsModal, 
+  BranchTransferModal, 
+  BranchAnalyticsModal 
+} from './BranchModals';
 
-export const BranchesList: React.FC<{ onNavigate?: (view: string) => void }> = ({ onNavigate }) => {
-  const { addToast } = useUI();
+interface BranchesListProps {
+  onNavigate?: (view: string, params?: any) => void;
+}
+
+export const BranchesList: React.FC<BranchesListProps> = ({ onNavigate }) => {
+  const { addToast, currency } = useUI();
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [metricsMap, setMetricsMap] = useState<Record<string, BranchMetrics>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Modals / Editors state
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentBranch, setCurrentBranch] = useState<Partial<Branch> | null>(null);
-  
-  const [isConfiguringSettings, setIsConfiguringSettings] = useState(false);
-  const [selectedSettings, setSelectedSettings] = useState<BranchSettings | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchBranches = async () => {
-    setIsLoading(true);
+  // Modal States
+  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<Partial<Branch> | null>(null);
+
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsBranch, setSettingsBranch] = useState<Branch | null>(null);
+
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferSourceBranchId, setTransferSourceBranchId] = useState<string>('');
+
+  const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState(false);
+  const [analyticsBranch, setAnalyticsBranch] = useState<Branch | null>(null);
+
+  const fetchBranchesData = useCallback(async (showToast = false) => {
+    setIsRefreshing(true);
     try {
       const data = await BranchService.getBranches();
       setBranches(data);
-    } catch (e) {
-      addToast("خطأ أثناء جلب الفروع", "error");
+
+      const metrics = await BranchService.getAllBranchMetrics();
+      setMetricsMap(metrics);
+
+      if (showToast) {
+        addToast('تم تحديث بيانات الفروع والمؤشرات بنجاح', 'success');
+      }
+    } catch {
+      addToast('خطأ أثناء جلب بيانات الفروع والمؤشرات', 'error');
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
-  };
+  }, [addToast]);
 
   useEffect(() => {
-    fetchBranches();
-  }, []);
+    fetchBranchesData();
+  }, [fetchBranchesData]);
 
-  const handleSaveBranch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentBranch?.name || !currentBranch?.code) {
-      addToast("يرجى إدخال اسم ورمز الفرع", "warning");
-      return;
-    }
-    try {
-      await BranchService.saveBranch(currentBranch);
-      addToast("تم حفظ الفرع بنجاح", "success");
-      setIsEditing(false);
-      setCurrentBranch(null);
-      fetchBranches();
-    } catch {
-      addToast("فشل حفظ الفرع", "error");
-    }
-  };
+  // Offline-first instant multi-field search
+  const filteredBranches = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return branches;
 
-  const handleConfigureSettings = async (branchId: string) => {
-    try {
-      const settings = await BranchService.getBranchSettings(branchId);
-      setSelectedSettings(settings);
-      setIsConfiguringSettings(true);
-    } catch {
-      addToast("خطأ أثناء جلب إعدادات الفرع", "error");
-    }
-  };
+    return branches.filter((b) => {
+      const codeMatch = (b.code || '').toLowerCase().includes(q);
+      const nameMatch = (b.name || '').toLowerCase().includes(q);
+      const managerMatch = (b.managerName || '').toLowerCase().includes(q);
+      const locationMatch = (b.location || b.address || '').toLowerCase().includes(q);
+      const phoneMatch = (b.phone || '').toLowerCase().includes(q);
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSettings) return;
-    try {
-      await BranchService.saveBranchSettings(selectedSettings);
-      addToast("تم تحديث خيارات التنبيهات وإعادة الطلب بنجاح", "success");
-      setIsConfiguringSettings(false);
-      setSelectedSettings(null);
-    } catch {
-      addToast("فشل تحديث إعدادات الفرع", "error");
-    }
-  };
+      return codeMatch || nameMatch || managerMatch || locationMatch || phoneMatch;
+    });
+  }, [branches, searchTerm]);
 
-  const filteredBranches = branches.filter(b => 
-    b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (b.code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (b.location || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Summary Metrics calculations
+  const summaryStats = useMemo(() => {
+    const total = branches.length;
+    const active = branches.filter(b => b.isActive !== false).length;
+    
+    let totalSalesToday = 0;
+    let totalLowStockCount = 0;
+
+    Object.values(metricsMap).forEach(m => {
+      totalSalesToday += m.salesToday || 0;
+      totalLowStockCount += m.lowStockCount || 0;
+    });
+
+    return {
+      total,
+      active,
+      totalSalesToday: parseFloat(totalSalesToday.toFixed(2)),
+      totalLowStockCount,
+    };
+  }, [branches, metricsMap]);
 
   return (
-    <div className="space-y-5 w-full pb-10" dir="rtl">
+    <div className="space-y-4 sm:space-y-5 w-full pb-12 max-w-7xl mx-auto px-2 sm:px-4" dir="rtl">
       {/* 1. Header Banner */}
       <div className="bg-gradient-to-br from-[#0c312d] via-[#0f3834] to-[#08221f] rounded-[28px] p-5 sm:p-6 text-white shadow-xl relative overflow-hidden w-full">
         {/* Background ambient lighting */}
-        <div className="absolute left-0 top-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute right-0 bottom-0 w-48 h-48 bg-teal-500/5 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute left-0 top-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute right-0 bottom-0 w-48 h-48 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
 
         {/* Header Top Section: Title, Subtitle, Icon */}
-        <div className="flex justify-between items-start gap-3 sm:gap-4 mb-6 relative z-10">
+        <div className="flex justify-between items-start gap-3 sm:gap-4 mb-5 relative z-10">
           <div className="flex items-start gap-3 flex-1">
             {onNavigate && (
               <BackButton 
@@ -104,314 +123,372 @@ export const BranchesList: React.FC<{ onNavigate?: (view: string) => void }> = (
               />
             )}
             <div>
-              <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight">
-                إدارة فروع المؤسسة
-              </h1>
-              <p className="text-xs md:text-sm text-emerald-200/90 font-medium mt-1.5 leading-relaxed">
-                إدارة شاملة للمخازن والتحويلات البينية مع عزل كامل للصلاحيات
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight">
+                  إدارة شبكة الفروع والمخازن
+                </h1>
+                <span className="hidden sm:inline-flex items-center gap-1 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full">
+                  <ShieldCheck size={13} />
+                  <span>ERP Enterprise</span>
+                </span>
+              </div>
+              <p className="text-xs md:text-sm text-emerald-200/90 font-medium mt-1 leading-relaxed max-w-2xl">
+                إدارة شاملة للمخازن والتحويلات البينية ومؤشرات الأداء مع عزل كامل للصلاحيات والمزامنة المحلية
               </p>
             </div>
           </div>
-          <div className="w-12 h-12 md:w-14 md:h-14 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-300 shrink-0 shadow-inner">
-            <Building2 size={26} />
+          <div className="w-11 h-11 sm:w-13 sm:h-13 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-300 shrink-0 shadow-inner">
+            <Building2 size={24} />
           </div>
         </div>
 
         {/* Action Controls Row */}
-        <div className="flex items-center gap-3 relative z-10">
+        <div className="flex items-center gap-2.5 relative z-10">
           <button
+            type="button"
             onClick={() => {
-              setCurrentBranch({
+              setEditingBranch({
                 code: '',
                 name: '',
                 location: '',
+                address: '',
                 phone: '',
-                isActive: true
+                managerName: '',
+                workingHours: '08:00 ص - 12:00 م',
+                allowedDiscount: 5,
+                isMain: branches.length === 0,
+                isActive: true,
               });
-              setIsEditing(true);
+              setIsFormModalOpen(true);
             }}
-            className="flex-1 md:flex-initial bg-[#00c88c] hover:bg-[#00b07b] text-white font-bold text-xs md:text-sm px-6 py-3.5 rounded-2xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            className="flex-1 sm:flex-initial bg-[#00c88c] hover:bg-[#00b07b] text-white font-bold text-xs sm:text-sm px-5 py-3 rounded-2xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
           >
             <Plus size={18} />
             <span>إضافة فرع جديد</span>
           </button>
 
           <button
-            onClick={fetchBranches}
-            title="تحديث البيانات"
-            className="w-12 h-12 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-700/50 rounded-2xl flex items-center justify-center text-white transition-all cursor-pointer shrink-0 active:scale-95"
+            type="button"
+            onClick={() => fetchBranchesData(true)}
+            disabled={isRefreshing}
+            title="تحديث البيانات والمؤشرات"
+            className="w-11 h-11 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-700/50 rounded-2xl flex items-center justify-center text-white transition-all cursor-pointer shrink-0 active:scale-95 disabled:opacity-50"
           >
-            <RotateCw size={18} />
+            <RotateCw size={17} className={isRefreshing ? 'animate-spin' : ''} />
           </button>
+
+          {onNavigate && (
+            <button
+              type="button"
+              onClick={() => onNavigate('branch-reports')}
+              className="hidden sm:flex items-center gap-2 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-700/50 text-emerald-200 font-bold text-xs px-4 py-3 rounded-2xl transition-all cursor-pointer"
+            >
+              <Activity size={16} />
+              <span>التقارير التحليلية المجمعة</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 2. Search & Counter Section */}
-      <div className="space-y-3">
-        <div className="relative w-full">
-          <input
-            type="text"
-            placeholder="ابحث بالاسم، الرمز، أو العنوان..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-4 pr-11 py-3.5 text-sm bg-white border border-slate-200/90 rounded-2xl focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/10 text-slate-800 placeholder:text-slate-400 shadow-sm transition-all"
-          />
-          <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+      {/* 2. Top Metric Statistics Strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+        <div className="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-slate-400 block">الفروع النشطة</span>
+            <span className="text-base sm:text-lg font-black text-slate-800">
+              {summaryStats.active} <span className="text-xs font-bold text-slate-400">/ {summaryStats.total}</span>
+            </span>
+          </div>
+          <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <Building2 size={18} />
+          </div>
         </div>
 
-        <div className="text-center text-xs text-slate-500 font-medium">
-          الفروع النشطة: <span className="font-bold text-slate-800">{branches.filter(b => b.isActive).length}</span> من أصل <span className="font-bold text-slate-800">{branches.length}</span>
+        <div className="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-slate-400 block">إجمالي مبيعات اليوم</span>
+            <span className="text-base sm:text-lg font-black text-emerald-700">
+              {summaryStats.totalSalesToday.toLocaleString()} <span className="text-xs font-bold text-emerald-600">{currency}</span>
+            </span>
+          </div>
+          <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <CheckCircle2 size={18} />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-slate-400 block">نواقص المخزون بالشبكة</span>
+            <span className={`text-base sm:text-lg font-black ${summaryStats.totalLowStockCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+              {summaryStats.totalLowStockCount} <span className="text-xs font-bold text-slate-400">صنف</span>
+            </span>
+          </div>
+          <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <AlertTriangle size={18} />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-slate-400 block">حالة المزامنة السحابية</span>
+            <span className="text-xs sm:text-sm font-black text-emerald-700 flex items-center gap-1.5 mt-0.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>متصل ويعمل محلياً</span>
+            </span>
+          </div>
+          <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
+            <Wifi size={18} />
+          </div>
         </div>
       </div>
 
-      {/* 3. Cards List */}
+      {/* 3. Search Bar */}
+      <div className="relative w-full">
+        <input
+          type="text"
+          placeholder="ابحث برمز الفرع، الاسم، الصيدلي المسؤول، العنوان أو الهاتف..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full pl-4 pr-11 py-3 text-xs sm:text-sm bg-white border border-slate-200/90 rounded-2xl focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/10 text-slate-800 placeholder:text-slate-400 shadow-sm transition-all"
+        />
+        <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+      </div>
+
+      {/* 4. Branch Cards Grid */}
       {isLoading ? (
-        <div className="flex items-center justify-center p-12">
-          <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-[28px] border border-slate-100 shadow-sm">
+          <div className="w-9 h-9 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3" />
+          <p className="text-xs text-slate-400 font-bold">جاري تحميل بيانات شبكة الفروع والمخازن...</p>
         </div>
       ) : filteredBranches.length === 0 ? (
-        <div className="bg-white rounded-[24px] p-12 text-center border border-slate-100 shadow-sm">
-          <Building2 className="mx-auto text-slate-300 mb-3" size={40} />
-          <p className="text-slate-500 font-bold text-sm">لا توجد فروع لمطابقة البحث</p>
+        <div className="bg-white rounded-[28px] p-12 text-center border border-slate-100 shadow-sm">
+          <Building2 className="mx-auto text-slate-300 mb-3" size={42} />
+          <h3 className="text-sm font-black text-slate-700">لا توجد فروع مطابقة لمعايير البحث</h3>
+          <p className="text-xs text-slate-400 font-medium mt-1">
+            جرب البحث بكلمات أخرى أو أضف فرعاً جديداً للشبكة.
+          </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {filteredBranches.map((branch) => (
-            <motion.div
-              layout
-              key={branch.id}
-              className="bg-white rounded-[24px] p-5 md:p-6 border border-slate-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden"
-            >
-              {/* Green vertical bar on left edge */}
-              <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500 rounded-l-2xl" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+          {filteredBranches.map((branch) => {
+            const metrics = metricsMap[branch.id] || {
+              branchId: branch.id,
+              salesToday: 0,
+              salesTodayCount: 0,
+              inventoryValue: 0,
+              lowStockCount: 0,
+              totalProductsCount: 0,
+              syncStatus: 'ONLINE',
+            };
 
-              {/* Card Top Row: Green Dot & Code Badge */}
-              <div className="flex justify-between items-center mb-3">
-                <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${branch.isActive ? 'bg-emerald-500 ring-4 ring-emerald-500/10' : 'bg-slate-300'}`} />
-                </div>
+            const isMainBranch = branch.isMain || branch.is_main || branch.code?.includes('MAIN');
 
-                <span className="text-xs font-bold bg-[#eefaf6] text-emerald-800 px-3.5 py-1 rounded-full uppercase tracking-wider">
-                  {branch.code}
-                </span>
-              </div>
+            return (
+              <motion.div
+                layout
+                key={branch.id}
+                className="bg-white rounded-[24px] p-4 sm:p-5 border border-slate-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden flex flex-col justify-between"
+              >
+                {/* Visual side accent bar */}
+                <div
+                  className={`absolute left-0 top-0 bottom-0 w-1.5 ${
+                    branch.isActive !== false ? 'bg-emerald-500' : 'bg-slate-300'
+                  } rounded-l-2xl`}
+                />
 
-              {/* Branch Name */}
-              <h3 className="text-base md:text-lg font-black text-slate-800 mb-3 pr-1">
-                {branch.name}
-              </h3>
+                <div>
+                  {/* Top Badges Row */}
+                  <div className="flex justify-between items-center gap-2 mb-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-black bg-[#eefaf6] text-emerald-800 px-3 py-0.5 rounded-full uppercase tracking-wider border border-emerald-100">
+                        {branch.code}
+                      </span>
+                      {isMainBranch && (
+                        <span className="text-[10px] font-black bg-teal-50 text-teal-800 px-2.5 py-0.5 rounded-full border border-teal-200">
+                          الفرع الرئيسي
+                        </span>
+                      )}
+                    </div>
 
-              {/* Branch Details */}
-              <div className="space-y-2 text-xs font-bold text-slate-500 mb-5 pr-1">
-                <div className="flex items-center gap-2.5">
-                  <MapPin size={15} className="text-slate-400 shrink-0" />
-                  <span>{branch.location || "بدون عنوان محدد"}</span>
-                </div>
-                {branch.phone && (
-                  <div className="flex items-center gap-2.5">
-                    <Phone size={15} className="text-slate-400 shrink-0" />
-                    <span dir="ltr" className="text-right">{branch.phone}</span>
+                    {/* Operational & Sync Status */}
+                    <div className="flex items-center gap-1">
+                      {metrics.syncStatus === 'ONLINE' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          <span>متصل</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                          <span>محلي</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
 
-              {/* Card Bottom Actions */}
-              <div className="flex items-center gap-2.5 pt-2">
-                <button
-                  onClick={() => {
-                    setCurrentBranch(branch);
-                    setIsEditing(true);
-                  }}
-                  className="w-11 h-11 bg-slate-100/80 hover:bg-slate-200 text-slate-600 rounded-2xl flex items-center justify-center transition-all cursor-pointer shrink-0 active:scale-95"
-                  title="تعديل الفرع"
-                >
-                  <Edit2 size={16} />
-                </button>
+                  {/* Branch Name */}
+                  <h3 className="text-sm sm:text-base font-black text-slate-800 mb-3 leading-snug">
+                    {branch.name}
+                  </h3>
 
-                <button
-                  onClick={() => handleConfigureSettings(branch.id)}
-                  className="flex-1 bg-slate-100/80 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 px-4 rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
-                >
-                  <SlidersHorizontal size={16} />
-                  <span>خيارات التنبؤ</span>
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
+                  {/* Branch Contact & Management Details */}
+                  <div className="space-y-1.5 text-xs text-slate-500 mb-4 bg-slate-50/70 p-3 rounded-2xl border border-slate-100/80">
+                    {branch.managerName && (
+                      <div className="flex items-center gap-2">
+                        <UserCheck size={14} className="text-emerald-600 shrink-0" />
+                        <span className="font-bold text-slate-700">{branch.managerName}</span>
+                      </div>
+                    )}
 
-      {/* Edit / Create Branch Modal */}
-      <AnimatePresence>
-        {isEditing && currentBranch && (
-          <div className="fixed inset-0 z-[600] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-              onClick={() => setIsEditing(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-white rounded-[28px] p-7 max-w-md w-full relative z-10 shadow-2xl border border-slate-50"
-            >
-              <h2 className="text-lg font-black text-[#0c312d] mb-5">
-                {currentBranch.id ? 'تعديل بيانات الفرع' : 'إضافة فرع جديد'}
-              </h2>
+                    <div className="flex items-center gap-2">
+                      <MapPin size={14} className="text-slate-400 shrink-0" />
+                      <span className="truncate font-medium">{branch.location || branch.address || 'بدون عنوان محدد'}</span>
+                    </div>
 
-              <form onSubmit={handleSaveBranch} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-black text-slate-600 mb-1.5">رمز الفرع الفريد</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!!currentBranch.id}
-                    placeholder="مثال: BRH-NORTH"
-                    value={currentBranch.code}
-                    onChange={(e) => setCurrentBranch({...currentBranch, code: e.target.value.toUpperCase()})}
-                    className="w-full px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0c312d] text-slate-800 disabled:opacity-50 font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-slate-600 mb-1.5">اسم الفرع</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="مثال: فرع الرياض - المروج"
-                    value={currentBranch.name}
-                    onChange={(e) => setCurrentBranch({...currentBranch, name: e.target.value})}
-                    className="w-full px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0c312d] text-slate-800 font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-slate-600 mb-1.5">جهة الرياض / العنوان</label>
-                  <input
-                    type="text"
-                    placeholder="العنوان الكامل للفرع"
-                    value={currentBranch.location}
-                    onChange={(e) => setCurrentBranch({...currentBranch, location: e.target.value})}
-                    className="w-full px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0c312d] text-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-slate-600 mb-1.5">رقم الهاتف</label>
-                  <input
-                    type="text"
-                    placeholder="مثال: +966 11 405 1234"
-                    value={currentBranch.phone}
-                    onChange={(e) => setCurrentBranch({...currentBranch, phone: e.target.value})}
-                    className="w-full px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0c312d] text-slate-800"
-                  />
-                </div>
-                <div className="flex items-center gap-3 pt-2">
-                  <input
-                    type="checkbox"
-                    id="branch-active"
-                    checked={currentBranch.isActive}
-                    onChange={(e) => setCurrentBranch({...currentBranch, isActive: e.target.checked})}
-                    className="w-4 h-4 text-[#00c88c] focus:ring-[#00c88c] border-slate-300 rounded"
-                  />
-                  <label htmlFor="branch-active" className="text-xs font-bold text-slate-700 cursor-pointer">الفرع نشط ويستقبل حركات المخزون والبيع</label>
-                </div>
+                    {branch.phone && (
+                      <div className="flex items-center gap-2">
+                        <Phone size={14} className="text-slate-400 shrink-0" />
+                        <span dir="ltr" className="text-right font-medium text-slate-600">{branch.phone}</span>
+                      </div>
+                    )}
 
-                <div className="flex gap-2.5 pt-4">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-[#0c312d] hover:bg-[#07211e] text-white font-bold text-xs py-3.5 rounded-2xl transition-all shadow-md cursor-pointer"
-                  >
-                    حفظ التغييرات
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing(false)}
-                    className="px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-2xl transition-all cursor-pointer"
-                  >
-                    إلغاء
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+                    {branch.workingHours && (
+                      <div className="flex items-center gap-2">
+                        <Clock size={14} className="text-slate-400 shrink-0" />
+                        <span className="font-medium text-slate-500 text-[11px]">{branch.workingHours}</span>
+                      </div>
+                    )}
+                  </div>
 
-      {/* Configure Settings Modal */}
-      <AnimatePresence>
-        {isConfiguringSettings && selectedSettings && (
-          <div className="fixed inset-0 z-[600] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-              onClick={() => setIsConfiguringSettings(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-white rounded-[28px] p-7 max-w-md w-full relative z-10 shadow-2xl border border-slate-50"
-            >
-              <h2 className="text-lg font-black text-[#0c312d] mb-5 flex items-center gap-2">
-                <SlidersHorizontal size={20} className="text-emerald-600" />
-                <span>خيارات التنبؤ والطلب التلقائي للفرع</span>
-              </h2>
-
-              <form onSubmit={handleSaveSettings} className="space-y-5">
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      id="stock-alert"
-                      checked={selectedSettings.minStockLevelAlert}
-                      onChange={(e) => setSelectedSettings({...selectedSettings, minStockLevelAlert: e.target.checked})}
-                      className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 rounded mt-0.5"
-                    />
+                  {/* Financial / Inventory Real-Time Summary */}
+                  <div className="grid grid-cols-3 gap-1.5 mb-4 p-2.5 bg-emerald-50/30 rounded-2xl border border-emerald-100/60 text-center">
                     <div>
-                      <label htmlFor="stock-alert" className="text-xs font-black text-slate-700 cursor-pointer">تفعيل منبهات انخفاض مستوى المخزون</label>
-                      <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">يقوم النظام بتنبيه أمين مستودع الفرع عندما يقل صنف عن نقطة إعادة الطلب المحددة له محلياً.</p>
+                      <span className="text-[10px] font-bold text-slate-400 block">مبيعات اليوم</span>
+                      <span className="text-xs font-black text-emerald-700 block mt-0.5">
+                        {metrics.salesToday.toLocaleString()} <span className="text-[9px]">{currency}</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block">قيمة المخزون</span>
+                      <span className="text-xs font-black text-slate-800 block mt-0.5">
+                        {metrics.inventoryValue.toLocaleString()} <span className="text-[9px]">{currency}</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block">نواقص المخزون</span>
+                      <span className={`text-xs font-black block mt-0.5 ${metrics.lowStockCount > 0 ? 'text-amber-600' : 'text-slate-700'}`}>
+                        {metrics.lowStockCount} صنف
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-black text-slate-600 mb-1.5">أيام التغطية المستهدفة لإعادة الطلب التلقائي</label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={120}
-                    required
-                    value={selectedSettings.autoReorderTargetDays}
-                    onChange={(e) => setSelectedSettings({...selectedSettings, autoReorderTargetDays: parseInt(e.target.value, 10)})}
-                    className="w-full px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0c312d] text-slate-800 font-bold"
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">أيام التغطية النموذجية التي يعتمد عليها خوارزمي التنبؤ بالطلب التلقائي لتغطية مبيعات الفرع.</p>
-                </div>
-
-                <div className="flex gap-2.5 pt-4">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-[#0c312d] hover:bg-[#07211e] text-white font-bold text-xs py-3.5 rounded-2xl transition-all shadow-md cursor-pointer"
-                  >
-                    تطبيق الإعدادات
-                  </button>
+                {/* Card Bottom Actions Row */}
+                <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100">
+                  {/* Transfer Action */}
                   <button
                     type="button"
-                    onClick={() => setIsConfiguringSettings(false)}
-                    className="px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-2xl transition-all cursor-pointer"
+                    onClick={() => {
+                      setTransferSourceBranchId(branch.id);
+                      setIsTransferModalOpen(true);
+                    }}
+                    title="مناقلة مخزنية"
+                    className="flex-1 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-800 font-bold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
                   >
-                    إلغاء
+                    <ArrowLeftRight size={14} />
+                    <span>تحويل</span>
+                  </button>
+
+                  {/* Analytics Action */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnalyticsBranch(branch);
+                      setIsAnalyticsModalOpen(true);
+                    }}
+                    title="تحليلات الفرع"
+                    className="w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center justify-center transition-all cursor-pointer shrink-0 active:scale-95"
+                  >
+                    <Activity size={15} />
+                  </button>
+
+                  {/* Settings Action */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsBranch(branch);
+                      setIsSettingsModalOpen(true);
+                    }}
+                    title="خيارات التنبؤ والطلب التلقائي"
+                    className="w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center justify-center transition-all cursor-pointer shrink-0 active:scale-95"
+                  >
+                    <SlidersHorizontal size={15} />
+                  </button>
+
+                  {/* Edit Action */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingBranch(branch);
+                      setIsFormModalOpen(true);
+                    }}
+                    title="تعديل بيانات الفرع"
+                    className="w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center justify-center transition-all cursor-pointer shrink-0 active:scale-95"
+                  >
+                    <Edit2 size={15} />
                   </button>
                 </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal 1: Add / Edit Branch Form Modal */}
+      <BranchFormModal
+        isOpen={isFormModalOpen}
+        branch={editingBranch}
+        onClose={() => {
+          setIsFormModalOpen(false);
+          setEditingBranch(null);
+        }}
+        onSuccess={() => fetchBranchesData()}
+      />
+
+      {/* Modal 2: Branch Auto-Reorder / Forecast Settings Modal */}
+      <BranchSettingsModal
+        isOpen={isSettingsModalOpen}
+        branch={settingsBranch}
+        onClose={() => {
+          setIsSettingsModalOpen(false);
+          setSettingsBranch(null);
+        }}
+      />
+
+      {/* Modal 3: Inter-Branch Stock Transfer Modal */}
+      <BranchTransferModal
+        isOpen={isTransferModalOpen}
+        sourceBranchId={transferSourceBranchId}
+        branches={branches}
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          setTransferSourceBranchId('');
+        }}
+        onSuccess={() => fetchBranchesData()}
+      />
+
+      {/* Modal 4: Real-time Analytics & Low Stock Predictions Modal */}
+      <BranchAnalyticsModal
+        isOpen={isAnalyticsModalOpen}
+        branch={analyticsBranch}
+        metrics={analyticsBranch ? metricsMap[analyticsBranch.id] || null : null}
+        onClose={() => {
+          setIsAnalyticsModalOpen(false);
+          setAnalyticsBranch(null);
+        }}
+      />
     </div>
   );
 };
-

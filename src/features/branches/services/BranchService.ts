@@ -2,7 +2,7 @@
 
 import { db } from "@/core/db";
 import { 
-  Branch, BranchSettings, BranchInventory, TransferStatus 
+  Branch, BranchSettings, BranchInventory, TransferStatus, BranchMetrics 
 } from "@/types";
 import { UnifiedBusinessWorkflowOrchestrator } from "@/services/orchestration/UnifiedBusinessWorkflowOrchestrator";
 import { AuditService } from "@/services/system/AuditService";
@@ -41,8 +41,14 @@ export class BranchService {
         code: "BRH-MAIN",
         name: "فرع صيدلية بلسم الرئيسي - الرياض",
         location: "طريق الملك عبدالعزيز، الرياض",
+        address: "طريق الملك عبدالعزيز، مبنى 45، الرياض",
         phone: "+966 11 405 1234",
+        managerName: "د. أحمد المنصوري",
+        workingHours: "24 ساعة",
+        allowedDiscount: 10,
+        isMain: true,
         isActive: true,
+        status: "ONLINE",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -51,9 +57,15 @@ export class BranchService {
         id: "BRH-NRTH-002",
         code: "BRH-NORTH",
         name: "فرع شمال الرياض - الياسمين",
-        location: "شارع انس بن مالك، الياسمين، الرياض",
+        location: "شارع أنس بن مالك، الياسمين، الرياض",
+        address: "شارع أنس بن مالك، تقاطع طريق الملك فهد، الرياض",
         phone: "+966 11 204 5678",
+        managerName: "د. سارة العتيبي",
+        workingHours: "08:00 ص - 12:00 م",
+        allowedDiscount: 5,
+        isMain: false,
         isActive: true,
+        status: "ONLINE",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -63,8 +75,14 @@ export class BranchService {
         code: "BRH-WEST",
         name: "فرع غرب الرياض - البديعة",
         location: "طريق المدينة المنورة، البديعة، الرياض",
+        address: "طريق المدينة المنورة، بجوار مجمع العيادات، الرياض",
         phone: "+966 11 433 9876",
+        managerName: "د. خالد القحطاني",
+        workingHours: "08:00 ص - 11:00 م",
+        allowedDiscount: 5,
+        isMain: false,
         isActive: true,
+        status: "ONLINE",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -155,22 +173,118 @@ export class BranchService {
   }
 
   /**
+   * Retrieves real calculated metrics for all branches in single pass
+   */
+  static async getAllBranchMetrics(): Promise<Record<string, BranchMetrics>> {
+    const branches = await this.getBranches();
+    const branchInvs = await db.branchInventory.toArray();
+    const products = await db.products.toArray();
+    const invoices = await db.invoices.toArray();
+
+    // Map products cost
+    const productCostMap = new Map<string, number>();
+    products.forEach(p => {
+      productCostMap.set(p.id, parseFloat((p.cost as any) || 0));
+    });
+
+    // Start of today in local date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTimestamp = today.getTime();
+
+    const metricsMap: Record<string, BranchMetrics> = {};
+
+    for (const b of branches) {
+      const invsForBranch = branchInvs.filter(i => i.branchId === b.id);
+      
+      let invValue = 0;
+      let lowStock = 0;
+
+      for (const item of invsForBranch) {
+        const unitCost = productCostMap.get(item.productId) || 0;
+        invValue += (item.stockQuantity || 0) * unitCost;
+        if ((item.stockQuantity || 0) <= (item.reorderPoint || 0)) {
+          lowStock++;
+        }
+      }
+
+      // Today's invoices for this branch
+      const todayInvoices = invoices.filter(inv => {
+        if (inv.type !== "SALE" || inv.status === "CANCELLED") return false;
+        const invTime = new Date(inv.date || inv.createdAt || inv.created_at || '').getTime();
+        const isToday = !isNaN(invTime) && invTime >= todayTimestamp;
+        if (!isToday) return false;
+        // If invoice has branchId, match exactly; otherwise if it is main branch, include
+        return inv.branchId === b.id || (!inv.branchId && (b.isMain || b.code === "BRH-MAIN"));
+      });
+
+      const todaySalesTotal = todayInvoices.reduce((acc, inv) => {
+        return acc + parseFloat((inv.totalAmount as any) || (inv.total as any) || 0);
+      }, 0);
+
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      const status: 'ONLINE' | 'OFFLINE' | 'SYNCING' | 'DEGRADED' = !isOnline 
+        ? 'OFFLINE' 
+        : (b.status || 'ONLINE');
+
+      metricsMap[b.id] = {
+        branchId: b.id,
+        salesToday: parseFloat(todaySalesTotal.toFixed(2)),
+        salesTodayCount: todayInvoices.length,
+        inventoryValue: parseFloat(invValue.toFixed(2)),
+        lowStockCount: lowStock,
+        totalProductsCount: invsForBranch.length,
+        syncStatus: status,
+      };
+    }
+
+    return metricsMap;
+  }
+
+  /**
    * Save or Update a Branch
    */
   static async saveBranch(branch: Partial<Branch>): Promise<string> {
-    const id = branch.id || `BRH-${Date.now()}`;
-    const now = new Date().toISOString();
     const isNew = !branch.id;
+    const now = new Date().toISOString();
+    const id = branch.id || `BRH-${Date.now()}`;
+
+    // Validate uniqueness of code on creation
+    if (isNew && branch.code) {
+      const existing = await db.branches.where("code").equals(branch.code.trim().toUpperCase()).first();
+      if (existing) {
+        throw new Error(`رمز الفرع [${branch.code}] مستخدم بالفعل لفرع آخر`);
+      }
+    }
+
     const payload: Branch = {
       id,
-      code: branch.code || "BRH-CODE",
-      name: branch.name || "",
-      location: branch.location || "",
-      phone: branch.phone || "",
+      code: branch.code?.trim().toUpperCase() || "BRH-CODE",
+      name: branch.name?.trim() || "",
+      location: branch.location?.trim() || branch.address?.trim() || "",
+      address: branch.address?.trim() || branch.location?.trim() || "",
+      phone: branch.phone?.trim() || "",
+      managerName: branch.managerName?.trim() || "",
+      workingHours: branch.workingHours?.trim() || "08:00 ص - 12:00 م",
+      allowedDiscount: typeof branch.allowedDiscount === 'number' ? branch.allowedDiscount : 5,
+      isMain: !!branch.isMain,
       isActive: branch.isActive !== false,
+      status: branch.status || "ONLINE",
       createdAt: branch.createdAt || now,
       updatedAt: now,
     };
+
+    // If marked as isMain, clear isMain on other branches
+    if (payload.isMain) {
+      const otherBranches = await db.branches.toArray();
+      for (const other of otherBranches) {
+        if (other.id !== id && other.isMain) {
+          other.isMain = false;
+          await db.branches.put(other);
+        }
+      }
+    }
+
     await db.branches.put(payload);
 
     await AuditService.log({
