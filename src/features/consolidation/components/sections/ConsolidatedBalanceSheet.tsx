@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+cat << 'EOF' > src/features/consolidation/components/sections/ConsolidatedBalanceSheet.tsx
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { financialApiClient } from '@/shared/network/idempotency';
 import { ConsolidatedBalanceSheet as BalanceSheetType } from '../../consolidation.types';
 import { 
@@ -11,21 +12,18 @@ import {
   Loader2
 } from 'lucide-react';
 
-// تعريف واجهة للـ API response
 interface ApiResponse<T> {
   data: T;
   status: number;
   message?: string;
 }
 
-// تعريف نوع الخطأ
 interface ApiError {
   message: string;
   code?: string;
   status?: number;
 }
 
-// مكون فرعي لعرض بطاقة مالية
 const FinancialCard: React.FC<{
   title: string;
   icon: React.ReactNode;
@@ -68,14 +66,14 @@ const FinancialCard: React.FC<{
           <div key={index} className="flex justify-between" role="listitem">
             <span className="text-slate-500">{item.label}:</span>
             <span className="font-mono font-bold text-slate-800" aria-label={`${item.label}: ${item.value}`}>
-              ${item.value.toLocaleString('en-US')}
+              {item.value.toLocaleString('ar-SA')}
             </span>
           </div>
         ))}
         <div className={`flex justify-between border-t ${classes.border} pt-2 font-black ${classes.text} ${classes.bg} p-2 rounded-xl`}>
           <span>{totalLabel}:</span>
           <span className="font-mono text-sm" aria-label={`${totalLabel}: ${totalValue}`}>
-            ${totalValue.toLocaleString('en-US')}
+            {totalValue.toLocaleString('ar-SA')}
           </span>
         </div>
       </div>
@@ -83,7 +81,6 @@ const FinancialCard: React.FC<{
   );
 };
 
-// مكوّن شاشة التحميل
 const LoadingScreen: React.FC<{ text: string }> = ({ text }) => (
   <div className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center p-6 text-center" dir="rtl" role="status" aria-live="polite">
     <Loader2 className="w-16 h-16 text-[#064e46] animate-spin mb-6" aria-hidden="true" />
@@ -93,7 +90,6 @@ const LoadingScreen: React.FC<{ text: string }> = ({ text }) => (
   </div>
 );
 
-// مكوّن شاشة الخطأ
 const ErrorScreen: React.FC<{ message: string; onRetry: () => void }> = ({ message, onRetry }) => (
   <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4" dir="rtl">
     <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full text-center space-y-4">
@@ -115,27 +111,32 @@ const ErrorScreen: React.FC<{ message: string; onRetry: () => void }> = ({ messa
   </div>
 );
 
-const ConsolidatedBalanceSheet: React.FC = () => {
+export const ConsolidatedBalanceSheet: React.FC = () => {
   const [data, setData] = useState<BalanceSheetType | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [loadingText, setLoadingText] = useState('جاري تشغيل محرك الاندماج ومعالجة الموازين الفيدرالية...');
+  
+  const isMountedRef = useRef(true);
 
-  // استخدام useCallback لتجنب إعادة إنشاء الدالة
-  const fetchData = useCallback(async (isMounted: boolean) => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await financialApiClient.get<ApiResponse<BalanceSheetType>>(
+      setLoading(true);
+      setError(null);
+      setLoadingText('جاري تشغيل محرك الاندماج ومعالجة الموازين الفيدرالية...');
+
+      const response = await financialApiClient.get<any>(
         '/api/consolidation/balance-sheet'
       );
 
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
 
-      // التحقق من صحة البيانات
-      if (!response.data?.data) {
-        throw new Error('البيانات المستلمة غير صالحة');
+      const payload: BalanceSheetType = response.data?.data || response.data;
+
+      if (!payload) {
+        throw new Error('البيانات المستلمة غير صالحة أو فارغة');
       }
 
-      // التحقق من وجود جميع الخصائص المطلوبة
       const requiredFields = [
         'assets.cashAndCashEquivalents',
         'assets.accountsReceivable',
@@ -150,113 +151,104 @@ const ConsolidatedBalanceSheet: React.FC = () => {
       ];
 
       const missingFields = requiredFields.filter(field => {
-        const value = field.split('.').reduce((obj, key) => obj?.[key], response.data.data);
+        const value = field.split('.').reduce((obj: any, key) => obj?.[key], payload);
         return value === undefined || value === null || typeof value !== 'number';
       });
 
       if (missingFields.length > 0) {
-        throw new Error(`البيانات ناقصة: ${missingFields.join(', ')}`);
+        throw new Error(`البيانات ناقصة أو غير صحيحة: ${missingFields.join(', ')}`);
       }
 
-      setData(response.data.data);
-      setError(null);
+      setData(payload);
     } catch (err) {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       
       const apiError = err as ApiError;
       console.error('Failed to load balance sheet:', apiError);
       
-      // تحديد رسالة الخطأ المناسبة
       let errorMessage = 'حدث خطأ غير متوقع أثناء تحميل البيانات';
       if (apiError?.message) {
         errorMessage = apiError.message;
-      } else if (apiError?.code === 'NETWORK_ERROR') {
+      } else if (apiError?.code === 'NETWORK_ERROR' || apiError?.message?.includes('Network')) {
         errorMessage = 'تعذر الاتصال بالخادم. تحقق من اتصالك بالإنترنت';
       }
       
       setError(errorMessage);
     } finally {
-      if (isMounted) {
+      if (isMountedRef.current) {
         setLoading(false);
       }
     }
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
+    isMountedRef.current = true;
     
-    // تحسين تجربة التحميل
     const timer1 = setTimeout(() => {
-      if (isMounted) setLoadingText('تجميع أرصدة الفروع وإلغاء الحسابات المتبادلة بين الفروع...');
+      if (isMountedRef.current) setLoadingText('تجميع أرصدة الفروع وإلغاء الحسابات المتبادلة بين الفروع...');
     }, 1000);
 
     const timer2 = setTimeout(() => {
-      if (isMounted) setLoadingText('جارٍ معالجة العمليات البينية والتحقق من التوازن...');
+      if (isMountedRef.current) setLoadingText('جارٍ معالجة العمليات البينية والتحقق من التوازن...');
     }, 2500);
 
-    fetchData(isMounted);
+    fetchData();
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
       clearTimeout(timer1);
       clearTimeout(timer2);
     };
   }, [fetchData]);
 
-  // استخدام useMemo للقيم المحسوبة
   const formattedData = useMemo(() => {
     if (!data) return null;
     
+    const dateObj = data.timestamp ? new Date(data.timestamp) : new Date();
+    const isValidDate = !isNaN(dateObj.getTime());
+
     return {
       ...data,
-      timestamp: new Date(data.timestamp).toLocaleString('ar-SA', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
+      timestamp: isValidDate 
+        ? dateObj.toLocaleString('ar-SA', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : 'غير محدد'
     };
   }, [data]);
 
-  // عرض شاشة التحميل
   if (loading) {
     return <LoadingScreen text={loadingText} />;
   }
 
-  // عرض شاشة الخطأ
   if (error) {
     return (
       <ErrorScreen 
         message={error} 
         onRetry={() => {
-          setLoading(true);
-          setError(null);
-          fetchData(true);
+          fetchData();
         }} 
       />
     );
   }
 
-  // عرض شاشة عدم وجود بيانات
   if (!formattedData) {
     return (
       <ErrorScreen 
         message="لا توجد بيانات متاحة للميزانية العمومية الموحدة" 
-        onRetry={() => {
-          setLoading(true);
-          fetchData(true);
-        }} 
+        onRetry={() => fetchData()} 
       />
     );
   }
 
-  // عرض الميزانية الموحدة
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50 px-2 py-3 sm:px-4 font-sans text-slate-800">
       <div className="max-w-5xl mx-auto space-y-4">
         
-        {/* الهيدر الرئيسي */}
         <header className="bg-[#064e46] text-white rounded-2xl p-4 shadow-lg">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -293,10 +285,8 @@ const ConsolidatedBalanceSheet: React.FC = () => {
           </div>
         </header>
 
-        {/* كروت الأصول والالتزامات وحقوق الملكية */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           
-          {/* الأصول */}
           <FinancialCard
             title="الأصول الموحدة (Assets)"
             icon={<FileSpreadsheet size={16} aria-hidden="true" />}
@@ -310,7 +300,6 @@ const ConsolidatedBalanceSheet: React.FC = () => {
             totalValue={formattedData.assets.totalAssets}
           />
 
-          {/* الالتزامات */}
           <FinancialCard
             title="الالتزامات الموحدة (Liabilities)"
             icon={<FileSpreadsheet size={16} aria-hidden="true" />}
@@ -323,7 +312,6 @@ const ConsolidatedBalanceSheet: React.FC = () => {
             totalValue={formattedData.liabilities.totalLiabilities}
           />
 
-          {/* حقوق الملكية */}
           <FinancialCard
             title="حقوق الملكية (Equity)"
             icon={<FileSpreadsheet size={16} aria-hidden="true" />}
@@ -343,3 +331,5 @@ const ConsolidatedBalanceSheet: React.FC = () => {
 };
 
 export default ConsolidatedBalanceSheet;
+EOF
+    
