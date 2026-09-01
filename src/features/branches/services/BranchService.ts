@@ -5,6 +5,8 @@ import {
   Branch, BranchSettings, BranchInventory, TransferStatus 
 } from "@/types";
 import { UnifiedBusinessWorkflowOrchestrator } from "@/services/orchestration/UnifiedBusinessWorkflowOrchestrator";
+import { AuditService } from "@/services/system/AuditService";
+import { ProjectionEventBus } from "@/services/system/ProjectionEventBus";
 
 export class BranchService {
   private static replicationListeners = new Set<(type: string, payload: any) => void>();
@@ -158,6 +160,7 @@ export class BranchService {
   static async saveBranch(branch: Partial<Branch>): Promise<string> {
     const id = branch.id || `BRH-${Date.now()}`;
     const now = new Date().toISOString();
+    const isNew = !branch.id;
     const payload: Branch = {
       id,
       code: branch.code || "BRH-CODE",
@@ -169,6 +172,17 @@ export class BranchService {
       updatedAt: now,
     };
     await db.branches.put(payload);
+
+    await AuditService.log({
+      action: isNew ? 'CREATE' : 'EDIT',
+      module: 'SETTINGS',
+      transactionUuid: id,
+      recordId: id,
+      after: payload
+    });
+
+    await ProjectionEventBus.publish(isNew ? 'BRANCH_CREATED' : 'BRANCH_UPDATED', id, { branch: payload });
+    this.triggerReplication(isNew ? "BranchCreated" : "BranchUpdated", payload);
     return id;
   }
 
@@ -197,6 +211,17 @@ export class BranchService {
   static async saveBranchSettings(settings: BranchSettings): Promise<void> {
     settings.updatedAt = new Date().toISOString();
     await db.branchSettings.put(settings);
+
+    await AuditService.log({
+      action: 'EDIT',
+      module: 'SETTINGS',
+      transactionUuid: settings.id,
+      recordId: settings.id,
+      after: settings
+    });
+
+    await ProjectionEventBus.publish('BRANCH_SETTINGS_UPDATED', settings.branchId, { settings });
+    this.triggerReplication("BranchSettingsUpdated", settings);
   }
 
   /**

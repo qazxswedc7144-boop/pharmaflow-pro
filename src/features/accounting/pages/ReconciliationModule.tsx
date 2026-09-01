@@ -25,8 +25,6 @@ interface ReconciliationModuleProps {
 }
 
 export const ReconciliationModule: React.FC<ReconciliationModuleProps> = ({ onNavigate }) => {
-  const currency = 'ر.ي';
-
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'MATCHED' | 'DISCREPANCY' | 'PENDING'>('ALL');
 
