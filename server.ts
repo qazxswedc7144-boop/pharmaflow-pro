@@ -110,7 +110,7 @@ async function startServer() {
     }, 100);
   }
 
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
   
   // Clean up any stale processes in development if needed
   if (process.env.NODE_ENV !== "production") {

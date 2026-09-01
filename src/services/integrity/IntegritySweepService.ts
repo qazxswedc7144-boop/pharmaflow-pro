@@ -227,7 +227,9 @@ export class IntegritySweepService {
     ] as const;
     let healthy = true;
 
-    const actualTableNames = typeof db.getExistingTableNames === 'function' ? db.getExistingTableNames() : db.tables.map((t: any) => t.name);
+    const actualTableNames = typeof db.getExistingTableNames === 'function' 
+      ? db.getExistingTableNames() 
+      : (Array.isArray(db.tables) ? db.tables.map((t: any) => t.name) : []);
 
     for (const tableName of tables) {
       if (!actualTableNames.includes(tableName)) {

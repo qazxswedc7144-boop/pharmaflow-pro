@@ -60,7 +60,7 @@ export class SalesWorkflow implements BusinessWorkflow<SalesWorkflowInput, Sales
     if (!allowNegativeStock && !input.isReturn) {
       for (const item of input.items) {
         if (!item.productId) continue;
-        const product = await db.getProduct(item.productId);
+        const product = await db.products.get(item.productId);
         if (product && (product.quantity || 0) < item.quantity) {
           throw new Error(
             `الكمية المطلوبة غير متوفرة بالمخزن للصنف [${product.name || item.name}]. المتوفر: ${product.quantity || 0}`

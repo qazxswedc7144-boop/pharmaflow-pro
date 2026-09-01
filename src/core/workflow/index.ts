@@ -10,3 +10,4 @@ export * from './workflowRecovery';
 export * from './workflowRegistry';
 export * from './workflowExecution';
 export * from './workflowOrchestrator';
+export * from './bootstrapWorkflows';

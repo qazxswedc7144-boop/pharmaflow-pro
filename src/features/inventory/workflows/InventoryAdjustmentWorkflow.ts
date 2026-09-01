@@ -22,7 +22,7 @@ export class InventoryAdjustmentWorkflow implements BusinessWorkflow<InventoryAd
   public operationType = 'INVENTORY_ADJUSTMENT';
   public requiredPermissions = ['inventory.adjust', 'inventory.manage'];
   public tables = [
-    'inventoryTransactions', 'products', 'journalEntries', 'journalLines',
+    'inventoryTransactions', 'products', 'warehouseStock', 'journalEntries', 'journalLines',
     'accounts', 'auditLogs', 'idempotencyKeys', 'projectionEvents'
   ];
 

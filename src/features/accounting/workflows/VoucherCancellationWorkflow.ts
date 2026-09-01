@@ -40,7 +40,7 @@ export class VoucherCancellationWorkflow implements BusinessWorkflow<VoucherCanc
   }
 
   public async validateBusinessRules(input: VoucherCancellationInput): Promise<void> {
-    const voucher = await db.db.vouchers.get(input.id);
+    const voucher = await db.vouchers.get(input.id);
     if (!voucher) {
       // Also check fallback if needed
       const existsInReceipts = input.type === 'RECEIPT' ? await db.receipts.get(input.id) : null;

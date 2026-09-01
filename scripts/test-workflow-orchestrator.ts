@@ -118,6 +118,7 @@ async function runWorkflowOrchestratorTestSuite() {
   // Test C: Double Execution / Concurrency Guard
   await assertTest('Test C: Double Execution & Concurrency Guard', async () => {
     setAuthenticatedUser();
+    await db.products.put({ id: 'PROD-CONC', name: 'Conc Product', stock: 50, quantity: 50, is_active: true });
     const key = `CONCURRENCY_TEST_${Date.now()}`;
     
     // Execute parallel workflows with identical idempotency key
