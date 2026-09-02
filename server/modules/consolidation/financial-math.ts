@@ -98,6 +98,13 @@ export class FinancialMath {
   }
 
   /**
+   * Alias for isBalanced for semantic equality checks
+   */
+  public static equals(a: any, b: any, tolerance = 0.01): boolean {
+    return this.isBalanced(a, b, tolerance);
+  }
+
+  /**
    * Computes the absolute discrepancy between two numbers
    */
   public static discrepancy(a: any, b: any): number {

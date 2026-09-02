@@ -1,4 +1,3 @@
-cat << 'EOF' > src/features/consolidation/components/sections/ConsolidatedBalanceSheet.tsx
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { financialApiClient } from '@/shared/network/idempotency';
 import { ConsolidatedBalanceSheet as BalanceSheetType } from '../../consolidation.types';
@@ -11,12 +10,6 @@ import {
   RefreshCw,
   Loader2
 } from 'lucide-react';
-
-interface ApiResponse<T> {
-  data: T;
-  status: number;
-  message?: string;
-}
 
 interface ApiError {
   message: string;
@@ -331,5 +324,3 @@ export const ConsolidatedBalanceSheet: React.FC = () => {
 };
 
 export default ConsolidatedBalanceSheet;
-EOF
-    

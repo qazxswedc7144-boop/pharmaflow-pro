@@ -2,6 +2,7 @@
 
 import { prisma } from "../../database/prisma";
 import { Branch, Product, InventoryMovement } from "@prisma/client";
+import { ConsolidationLogger } from "./consolidation.logger";
 
 export class ConsolidationRepository {
   /**
@@ -445,11 +446,16 @@ export class ConsolidationRepository {
           before: null,
           after: JSON.stringify(payload),
           ipAddress: ipAddress || "SYSTEM",
+          requestId: payload?.requestId || null,
           branchId: "CONSOLIDATED"
         }
       });
     } catch (err) {
-      console.warn("[ConsolidationRepo] Failed writing audit log, continuing:", err);
+      ConsolidationLogger.warn("[ConsolidationRepo] Failed writing audit log, continuing", {
+        tenantId: validTenantId,
+        component: "ConsolidationRepository",
+        context: { error: err instanceof Error ? err.message : String(err) }
+      });
       return null;
     }
   }
@@ -481,7 +487,11 @@ export class ConsolidationRepository {
         }
       });
     } catch (err) {
-      console.warn("[ConsolidationRepo] Failed publishing sync event, continuing:", err);
+      ConsolidationLogger.warn("[ConsolidationRepo] Failed publishing sync event, continuing", {
+        tenantId: validTenantId,
+        component: "ConsolidationRepository",
+        context: { error: err instanceof Error ? err.message : String(err) }
+      });
       return null;
     }
   }

@@ -1,5 +1,6 @@
 // server/modules/consolidation/consolidation.service.ts
 // Production Financial Consolidation Service (Zero Fake Multipliers, Zero Plugs)
+// Integrated with Centralized Audit, Structured Logging, Metrics, and Financial Integrity Observability
 
 import { randomUUID } from "crypto";
 const uuidv4 = () => randomUUID();
@@ -7,7 +8,7 @@ const uuidv4 = () => randomUUID();
 import { ConsolidationRepository } from "./consolidation.repository";
 import { CONSOLIDATION_DEFAULTS } from "./consolidation.constants";
 import { RedisConnectionManager } from "../../database/redis";
-import { getCurrentTenantId } from "../../context/tenantContext";
+import { getCurrentTenantId, getCorrelationId, getRequestId } from "../../context/tenantContext";
 import {
   ConsolidatedBalanceSheet,
   ConsolidatedIncomeStatement,
@@ -24,11 +25,22 @@ import { FinancialStatementCalculator } from "./calculators/financial-statement.
 import { CashFlowCalculator } from "./calculators/cash-flow.calculator";
 import { TrialBalanceCalculator } from "./calculators/trial-balance.calculator";
 
+import { ConsolidationLogger } from "./consolidation.logger";
+import { ConsolidationMetrics } from "./consolidation.metrics";
+import { ConsolidationAuditService } from "./consolidation.audit";
+import { ConsolidationIntegrityMonitor } from "./consolidation.integrity";
+import {
+  ConsolidationError,
+  ConsolidationCalculationError,
+} from "./consolidation.errors";
+
 export class ConsolidationService {
   private static async getGeminiClient(): Promise<any> {
     const key = process.env.GEMINI_API_KEY;
     if (!key) {
-      console.warn("[GEMINI WORKER] No GEMINI_API_KEY available in environment. Fallback simulation active.");
+      ConsolidationLogger.debug("[GEMINI WORKER] No GEMINI_API_KEY in environment. Fallback deterministic rules active.", {
+        component: "ConsolidationService",
+      });
       return null;
     }
     try {
@@ -43,7 +55,10 @@ export class ConsolidationService {
         },
       });
     } catch (e) {
-      console.error("[GEMINI CLIENT] Fails to initialize:", e);
+      ConsolidationLogger.warn("[GEMINI CLIENT] Failed to initialize GoogleGenAI client:", {
+        component: "ConsolidationService",
+        context: { error: e instanceof Error ? e.message : String(e) },
+      });
       return null;
     }
   }
@@ -65,48 +80,152 @@ export class ConsolidationService {
    */
   static async generateBalanceSheet(
     tenantId: string = getCurrentTenantId(),
-    _userId = "SYSTEM",
+    userId = "SYSTEM",
     forceRefresh = false
   ): Promise<ConsolidatedBalanceSheet> {
-    const cacheKey = `${CONSOLIDATION_DEFAULTS.BALANCE_SHEET_CACHE_KEY}:${tenantId}`;
-    if (!forceRefresh) {
-      const cached = await RedisConnectionManager.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached) as ConsolidatedBalanceSheet;
+    const validTenantId = ConsolidationRepository.assertValidTenantId(tenantId);
+    const correlationId = getCorrelationId() || uuidv4();
+    const requestId = getRequestId() || uuidv4();
+    const startTime = performance.now();
+
+    ConsolidationMetrics.incrementActive();
+
+    try {
+      const cacheKey = `${CONSOLIDATION_DEFAULTS.BALANCE_SHEET_CACHE_KEY}:${validTenantId}`;
+      if (!forceRefresh) {
+        const cached = await RedisConnectionManager.get(cacheKey);
+        if (cached) {
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const parsed = JSON.parse(cached) as ConsolidatedBalanceSheet;
+
+          ConsolidationMetrics.recordExecution({
+            reportType: "BALANCE_SHEET",
+            tenantId: validTenantId,
+            durationMs,
+            status: "SUCCESS",
+            cacheStatus: "HIT",
+          });
+
+          ConsolidationLogger.info("Consolidated Balance Sheet cache hit", {
+            tenantId: validTenantId,
+            correlationId,
+            requestId,
+            durationMs,
+            component: "ConsolidationService",
+          });
+
+          return parsed;
+        }
       }
+
+      const [branches, journalLines, inventoryValuation, completedTransfers, products] = await Promise.all([
+        ConsolidationRepository.getBranches(validTenantId),
+        ConsolidationRepository.getAllPostedJournalLines(validTenantId),
+        this.generateInventoryValuation(validTenantId, forceRefresh),
+        ConsolidationRepository.getCompletedBranchTransfers(validTenantId),
+        ConsolidationRepository.getProductCatalog(validTenantId),
+      ]);
+
+      const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
+
+      // Compute current period net income from income statement for unclosed period equity reconciliation
+      const incomeStatement = await this.generateIncomeStatement(validTenantId, userId, forceRefresh);
+
+      const result = FinancialStatementCalculator.calculateBalanceSheet(
+        ledgerState,
+        inventoryValuation.totalInventoryValue,
+        branches,
+        completedTransfers,
+        products,
+        incomeStatement.netIncome
+      );
+
+      // Financial Integrity Verification
+      const integrity = ConsolidationIntegrityMonitor.verifyBalanceSheet(result, validTenantId, correlationId);
+      result.isBalanced = integrity.isBalanced;
+
+      // Tenant-scoped Redis Cache
+      await RedisConnectionManager.set(
+        cacheKey,
+        JSON.stringify(result),
+        "EX",
+        CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
+      );
+
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      const fingerprint = ConsolidationAuditService.generateFingerprint(result);
+
+      // Non-blocking Audit Logging
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId,
+        action: "GENERATE_BALANCE_SHEET",
+        reportType: "BALANCE_SHEET",
+        status: integrity.isBalanced ? "SUCCESS" : "WARNING",
+        durationMs,
+        parameters: { forceRefresh },
+        resultFingerprint: fingerprint,
+        financialIntegrity: integrity,
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      // Performance Metrics Recording
+      ConsolidationMetrics.recordExecution({
+        reportType: "BALANCE_SHEET",
+        tenantId: validTenantId,
+        durationMs,
+        status: integrity.isBalanced ? "SUCCESS" : "WARNING",
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+        isImbalanced: !integrity.isBalanced,
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      ConsolidationMetrics.recordExecution({
+        reportType: "BALANCE_SHEET",
+        tenantId: validTenantId,
+        durationMs,
+        status: "FAILURE",
+        cacheStatus: "MISS",
+      });
+
+      ConsolidationLogger.error("Failed to generate Consolidated Balance Sheet", err, {
+        tenantId: validTenantId,
+        correlationId,
+        requestId,
+        durationMs,
+        component: "ConsolidationService",
+      });
+
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId,
+        action: "GENERATE_BALANCE_SHEET",
+        reportType: "BALANCE_SHEET",
+        status: "FAILURE",
+        durationMs,
+        parameters: { forceRefresh },
+        cacheStatus: "MISS",
+        errorDetails: {
+          code: err instanceof ConsolidationError ? err.code : "CALCULATION_ERROR",
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        },
+      });
+
+      if (err instanceof ConsolidationError) throw err;
+      throw new ConsolidationCalculationError(`Failed to generate balance sheet: ${err instanceof Error ? err.message : String(err)}`, {
+        tenantId: validTenantId,
+        correlationId,
+      });
+    } finally {
+      ConsolidationMetrics.decrementActive();
     }
-
-    const [branches, journalLines, inventoryValuation, completedTransfers, products] = await Promise.all([
-      ConsolidationRepository.getBranches(tenantId),
-      ConsolidationRepository.getAllPostedJournalLines(tenantId),
-      this.generateInventoryValuation(tenantId, forceRefresh),
-      ConsolidationRepository.getCompletedBranchTransfers(tenantId),
-      ConsolidationRepository.getProductCatalog(tenantId),
-    ]);
-
-    const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
-
-    // Compute current period net income from income statement for unclosed period equity reconciliation
-    const incomeStatement = await this.generateIncomeStatement(tenantId, _userId, forceRefresh);
-
-    const result = FinancialStatementCalculator.calculateBalanceSheet(
-      ledgerState,
-      inventoryValuation.totalInventoryValue,
-      branches,
-      completedTransfers,
-      products,
-      incomeStatement.netIncome
-    );
-
-    // Cache with tenant-scoped key
-    await RedisConnectionManager.set(
-      cacheKey,
-      JSON.stringify(result),
-      "EX",
-      CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
-    );
-
-    return result;
   }
 
   /**
@@ -116,42 +235,122 @@ export class ConsolidationService {
    */
   static async generateIncomeStatement(
     tenantId: string = getCurrentTenantId(),
-    _userId = "SYSTEM",
+    userId = "SYSTEM",
     forceRefresh = false
   ): Promise<ConsolidatedIncomeStatement> {
-    const cacheKey = `${CONSOLIDATION_DEFAULTS.INCOME_STATEMENT_CACHE_KEY}:${tenantId}`;
-    if (!forceRefresh) {
-      const cached = await RedisConnectionManager.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached) as ConsolidatedIncomeStatement;
+    const validTenantId = ConsolidationRepository.assertValidTenantId(tenantId);
+    const correlationId = getCorrelationId() || uuidv4();
+    const requestId = getRequestId() || uuidv4();
+    const startTime = performance.now();
+
+    ConsolidationMetrics.incrementActive();
+
+    try {
+      const cacheKey = `${CONSOLIDATION_DEFAULTS.INCOME_STATEMENT_CACHE_KEY}:${validTenantId}`;
+      if (!forceRefresh) {
+        const cached = await RedisConnectionManager.get(cacheKey);
+        if (cached) {
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const parsed = JSON.parse(cached) as ConsolidatedIncomeStatement;
+
+          ConsolidationMetrics.recordExecution({
+            reportType: "INCOME_STATEMENT",
+            tenantId: validTenantId,
+            durationMs,
+            status: "SUCCESS",
+            cacheStatus: "HIT",
+          });
+
+          ConsolidationLogger.info("Consolidated Income Statement cache hit", {
+            tenantId: validTenantId,
+            correlationId,
+            requestId,
+            durationMs,
+            component: "ConsolidationService",
+          });
+
+          return parsed;
+        }
       }
+
+      const [branches, journalLines, invoices, products] = await Promise.all([
+        ConsolidationRepository.getBranches(validTenantId),
+        ConsolidationRepository.getAllPostedJournalLines(validTenantId),
+        ConsolidationRepository.getInvoices(validTenantId, 1, 1000, { type: "SALE" }),
+        ConsolidationRepository.getProductCatalog(validTenantId),
+      ]);
+
+      const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
+
+      const result = FinancialStatementCalculator.calculateIncomeStatement(
+        ledgerState,
+        branches,
+        invoices,
+        products
+      );
+
+      // Tenant-scoped Redis Cache
+      await RedisConnectionManager.set(
+        cacheKey,
+        JSON.stringify(result),
+        "EX",
+        CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
+      );
+
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      const fingerprint = ConsolidationAuditService.generateFingerprint(result);
+
+      // Non-blocking Audit Logging
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId,
+        action: "GENERATE_INCOME_STATEMENT",
+        reportType: "INCOME_STATEMENT",
+        status: "SUCCESS",
+        durationMs,
+        parameters: { forceRefresh },
+        resultFingerprint: fingerprint,
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      // Performance Metrics Recording
+      ConsolidationMetrics.recordExecution({
+        reportType: "INCOME_STATEMENT",
+        tenantId: validTenantId,
+        durationMs,
+        status: "SUCCESS",
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      ConsolidationMetrics.recordExecution({
+        reportType: "INCOME_STATEMENT",
+        tenantId: validTenantId,
+        durationMs,
+        status: "FAILURE",
+        cacheStatus: "MISS",
+      });
+
+      ConsolidationLogger.error("Failed to generate Consolidated Income Statement", err, {
+        tenantId: validTenantId,
+        correlationId,
+        requestId,
+        durationMs,
+        component: "ConsolidationService",
+      });
+
+      if (err instanceof ConsolidationError) throw err;
+      throw new ConsolidationCalculationError(`Failed to generate income statement: ${err instanceof Error ? err.message : String(err)}`, {
+        tenantId: validTenantId,
+        correlationId,
+      });
+    } finally {
+      ConsolidationMetrics.decrementActive();
     }
-
-    const [branches, journalLines, invoices, products] = await Promise.all([
-      ConsolidationRepository.getBranches(tenantId),
-      ConsolidationRepository.getAllPostedJournalLines(tenantId),
-      ConsolidationRepository.getInvoices(tenantId, 1, 1000, { type: "SALE" }),
-      ConsolidationRepository.getProductCatalog(tenantId),
-    ]);
-
-    const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
-
-    const result = FinancialStatementCalculator.calculateIncomeStatement(
-      ledgerState,
-      branches,
-      invoices,
-      products
-    );
-
-    // Cache with tenant-scoped key
-    await RedisConnectionManager.set(
-      cacheKey,
-      JSON.stringify(result),
-      "EX",
-      CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
-    );
-
-    return result;
   }
 
   /**
@@ -161,51 +360,140 @@ export class ConsolidationService {
    */
   static async generateCashFlow(
     tenantId: string = getCurrentTenantId(),
-    _userId = "SYSTEM",
+    userId = "SYSTEM",
     forceRefresh = false
   ): Promise<ConsolidatedCashFlow> {
-    const cacheKey = `${CONSOLIDATION_DEFAULTS.CASH_FLOW_CACHE_KEY}:${tenantId}`;
-    if (!forceRefresh) {
-      const cached = await RedisConnectionManager.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached) as ConsolidatedCashFlow;
+    const validTenantId = ConsolidationRepository.assertValidTenantId(tenantId);
+    const correlationId = getCorrelationId() || uuidv4();
+    const requestId = getRequestId() || uuidv4();
+    const startTime = performance.now();
+
+    ConsolidationMetrics.incrementActive();
+
+    try {
+      const cacheKey = `${CONSOLIDATION_DEFAULTS.CASH_FLOW_CACHE_KEY}:${validTenantId}`;
+      if (!forceRefresh) {
+        const cached = await RedisConnectionManager.get(cacheKey);
+        if (cached) {
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const parsed = JSON.parse(cached) as ConsolidatedCashFlow;
+
+          ConsolidationMetrics.recordExecution({
+            reportType: "CASH_FLOW",
+            tenantId: validTenantId,
+            durationMs,
+            status: "SUCCESS",
+            cacheStatus: "HIT",
+          });
+
+          ConsolidationLogger.info("Consolidated Cash Flow cache hit", {
+            tenantId: validTenantId,
+            correlationId,
+            requestId,
+            durationMs,
+            component: "ConsolidationService",
+          });
+
+          return parsed;
+        }
       }
-    }
 
-    const [branches, journalLines, completedTransfers] = await Promise.all([
-      ConsolidationRepository.getBranches(tenantId),
-      ConsolidationRepository.getAllPostedJournalLines(tenantId),
-      ConsolidationRepository.getCompletedBranchTransfers(tenantId),
-    ]);
+      const [branches, journalLines, completedTransfers] = await Promise.all([
+        ConsolidationRepository.getBranches(validTenantId),
+        ConsolidationRepository.getAllPostedJournalLines(validTenantId),
+        ConsolidationRepository.getCompletedBranchTransfers(validTenantId),
+      ]);
 
-    const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
+      const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
 
-    // Filter cash journal lines directly
-    const cashJournalLines = journalLines.filter(line => {
-      const category = LedgerBalanceCalculator.classifyAccount(
-        line.account.type,
-        line.account.code,
-        line.account.name
+      // Filter cash journal lines directly
+      const cashJournalLines = journalLines.filter(line => {
+        const category = LedgerBalanceCalculator.classifyAccount(
+          line.account.type,
+          line.account.code,
+          line.account.name
+        );
+        return category === "CASH";
+      });
+
+      const result = CashFlowCalculator.calculate(
+        ledgerState,
+        cashJournalLines,
+        branches,
+        completedTransfers
       );
-      return category === "CASH";
-    });
 
-    const result = CashFlowCalculator.calculate(
-      ledgerState,
-      cashJournalLines,
-      branches,
-      completedTransfers
-    );
+      // Financial Integrity Check: Reconcile with Balance Sheet cash
+      const integrity = ConsolidationIntegrityMonitor.verifyCashFlow(
+        result,
+        ledgerState.cashTotal,
+        validTenantId,
+        correlationId
+      );
 
-    // Cache with tenant-scoped key
-    await RedisConnectionManager.set(
-      cacheKey,
-      JSON.stringify(result),
-      "EX",
-      CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
-    );
+      // Cache with tenant-scoped key
+      await RedisConnectionManager.set(
+        cacheKey,
+        JSON.stringify(result),
+        "EX",
+        CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
+      );
 
-    return result;
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      const fingerprint = ConsolidationAuditService.generateFingerprint(result);
+
+      // Non-blocking Audit Logging
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId,
+        action: "GENERATE_CASH_FLOW",
+        reportType: "CASH_FLOW",
+        status: integrity.isBalanced ? "SUCCESS" : "WARNING",
+        durationMs,
+        parameters: { forceRefresh },
+        resultFingerprint: fingerprint,
+        financialIntegrity: integrity,
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      ConsolidationMetrics.recordExecution({
+        reportType: "CASH_FLOW",
+        tenantId: validTenantId,
+        durationMs,
+        status: integrity.isBalanced ? "SUCCESS" : "WARNING",
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+        isImbalanced: !integrity.isBalanced,
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      ConsolidationMetrics.recordExecution({
+        reportType: "CASH_FLOW",
+        tenantId: validTenantId,
+        durationMs,
+        status: "FAILURE",
+        cacheStatus: "MISS",
+      });
+
+      ConsolidationLogger.error("Failed to generate Consolidated Cash Flow", err, {
+        tenantId: validTenantId,
+        correlationId,
+        requestId,
+        durationMs,
+        component: "ConsolidationService",
+      });
+
+      if (err instanceof ConsolidationError) throw err;
+      throw new ConsolidationCalculationError(`Failed to generate cash flow: ${err instanceof Error ? err.message : String(err)}`, {
+        tenantId: validTenantId,
+        correlationId,
+      });
+    } finally {
+      ConsolidationMetrics.decrementActive();
+    }
   }
 
   /**
@@ -215,40 +503,125 @@ export class ConsolidationService {
    */
   static async generateTrialBalance(
     tenantId: string = getCurrentTenantId(),
-    _userId = "SYSTEM",
+    userId = "SYSTEM",
     forceRefresh = false
   ): Promise<ConsolidatedTrialBalance> {
-    const cacheKey = `${CONSOLIDATION_DEFAULTS.TRIAL_BALANCE_CACHE_KEY}:${tenantId}`;
-    if (!forceRefresh) {
-      const cached = await RedisConnectionManager.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached) as ConsolidatedTrialBalance;
+    const validTenantId = ConsolidationRepository.assertValidTenantId(tenantId);
+    const correlationId = getCorrelationId() || uuidv4();
+    const requestId = getRequestId() || uuidv4();
+    const startTime = performance.now();
+
+    ConsolidationMetrics.incrementActive();
+
+    try {
+      const cacheKey = `${CONSOLIDATION_DEFAULTS.TRIAL_BALANCE_CACHE_KEY}:${validTenantId}`;
+      if (!forceRefresh) {
+        const cached = await RedisConnectionManager.get(cacheKey);
+        if (cached) {
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const parsed = JSON.parse(cached) as ConsolidatedTrialBalance;
+
+          ConsolidationMetrics.recordExecution({
+            reportType: "TRIAL_BALANCE",
+            tenantId: validTenantId,
+            durationMs,
+            status: "SUCCESS",
+            cacheStatus: "HIT",
+          });
+
+          ConsolidationLogger.info("Consolidated Trial Balance cache hit", {
+            tenantId: validTenantId,
+            correlationId,
+            requestId,
+            durationMs,
+            component: "ConsolidationService",
+          });
+
+          return parsed;
+        }
       }
+
+      const [branches, journalLines, completedTransfers] = await Promise.all([
+        ConsolidationRepository.getBranches(validTenantId),
+        ConsolidationRepository.getAllPostedJournalLines(validTenantId),
+        ConsolidationRepository.getCompletedBranchTransfers(validTenantId),
+      ]);
+
+      const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
+
+      const result = TrialBalanceCalculator.calculate(
+        ledgerState,
+        branches,
+        completedTransfers
+      );
+
+      // Financial Integrity Verification
+      const integrity = ConsolidationIntegrityMonitor.verifyTrialBalance(result, validTenantId, correlationId);
+      result.isBalanced = integrity.isBalanced;
+
+      // Cache with tenant-scoped key
+      await RedisConnectionManager.set(
+        cacheKey,
+        JSON.stringify(result),
+        "EX",
+        CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
+      );
+
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      const fingerprint = ConsolidationAuditService.generateFingerprint(result);
+
+      // Non-blocking Audit Logging
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId,
+        action: "GENERATE_TRIAL_BALANCE",
+        reportType: "TRIAL_BALANCE",
+        status: integrity.isBalanced ? "SUCCESS" : "WARNING",
+        durationMs,
+        parameters: { forceRefresh },
+        resultFingerprint: fingerprint,
+        financialIntegrity: integrity,
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      ConsolidationMetrics.recordExecution({
+        reportType: "TRIAL_BALANCE",
+        tenantId: validTenantId,
+        durationMs,
+        status: integrity.isBalanced ? "SUCCESS" : "WARNING",
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+        isImbalanced: !integrity.isBalanced,
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      ConsolidationMetrics.recordExecution({
+        reportType: "TRIAL_BALANCE",
+        tenantId: validTenantId,
+        durationMs,
+        status: "FAILURE",
+        cacheStatus: "MISS",
+      });
+
+      ConsolidationLogger.error("Failed to generate Consolidated Trial Balance", err, {
+        tenantId: validTenantId,
+        correlationId,
+        requestId,
+        durationMs,
+        component: "ConsolidationService",
+      });
+
+      if (err instanceof ConsolidationError) throw err;
+      throw new ConsolidationCalculationError(`Failed to generate trial balance: ${err instanceof Error ? err.message : String(err)}`, {
+        tenantId: validTenantId,
+        correlationId,
+      });
+    } finally {
+      ConsolidationMetrics.decrementActive();
     }
-
-    const [branches, journalLines, completedTransfers] = await Promise.all([
-      ConsolidationRepository.getBranches(tenantId),
-      ConsolidationRepository.getAllPostedJournalLines(tenantId),
-      ConsolidationRepository.getCompletedBranchTransfers(tenantId),
-    ]);
-
-    const ledgerState = LedgerBalanceCalculator.calculateAggregatedLedger(journalLines, branches);
-
-    const result = TrialBalanceCalculator.calculate(
-      ledgerState,
-      branches,
-      completedTransfers
-    );
-
-    // Cache with tenant-scoped key
-    await RedisConnectionManager.set(
-      cacheKey,
-      JSON.stringify(result),
-      "EX",
-      CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
-    );
-
-    return result;
   }
 
   /**
@@ -260,56 +633,137 @@ export class ConsolidationService {
     tenantId: string = getCurrentTenantId(),
     forceRefresh = false
   ): Promise<ConsolidatedInventoryValuation> {
-    const cacheKey = `${CONSOLIDATION_DEFAULTS.INVENTORY_CACHE_KEY}:${tenantId}`;
-    if (!forceRefresh) {
-      const cached = await RedisConnectionManager.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached) as ConsolidatedInventoryValuation;
+    const validTenantId = ConsolidationRepository.assertValidTenantId(tenantId);
+    const correlationId = getCorrelationId() || uuidv4();
+    const requestId = getRequestId() || uuidv4();
+    const startTime = performance.now();
+
+    ConsolidationMetrics.incrementActive();
+
+    try {
+      const cacheKey = `${CONSOLIDATION_DEFAULTS.INVENTORY_CACHE_KEY}:${validTenantId}`;
+      if (!forceRefresh) {
+        const cached = await RedisConnectionManager.get(cacheKey);
+        if (cached) {
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const parsed = JSON.parse(cached) as ConsolidatedInventoryValuation;
+
+          ConsolidationMetrics.recordExecution({
+            reportType: "INVENTORY_VALUATION",
+            tenantId: validTenantId,
+            durationMs,
+            status: "SUCCESS",
+            cacheStatus: "HIT",
+          });
+
+          ConsolidationLogger.info("Consolidated Inventory Valuation cache hit", {
+            tenantId: validTenantId,
+            correlationId,
+            requestId,
+            durationMs,
+            component: "ConsolidationService",
+          });
+
+          return parsed;
+        }
       }
+
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+      const [branches, products, batches, inventoryLevels, recentSaleInvoices] = await Promise.all([
+        ConsolidationRepository.getBranches(validTenantId),
+        ConsolidationRepository.getProductCatalog(validTenantId),
+        ConsolidationRepository.getInventoryBatches(validTenantId),
+        ConsolidationRepository.getBranchInventoryLevels(validTenantId),
+        ConsolidationRepository.getInvoices(validTenantId, 1, 1000, {
+          startDate: ninetyDaysAgo,
+          type: "SALE",
+        }),
+      ]);
+
+      const result = InventoryValuationCalculator.calculate(
+        inventoryLevels,
+        products,
+        batches,
+        branches,
+        recentSaleInvoices
+      );
+
+      // Cache with tenant-scoped key
+      await RedisConnectionManager.set(
+        cacheKey,
+        JSON.stringify(result),
+        "EX",
+        CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
+      );
+
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      const fingerprint = ConsolidationAuditService.generateFingerprint(result);
+
+      // Non-blocking Audit Logging
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId: "SYSTEM",
+        action: "GENERATE_INVENTORY_VALUATION",
+        reportType: "INVENTORY_VALUATION",
+        status: "SUCCESS",
+        durationMs,
+        parameters: { forceRefresh },
+        resultFingerprint: fingerprint,
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      ConsolidationMetrics.recordExecution({
+        reportType: "INVENTORY_VALUATION",
+        tenantId: validTenantId,
+        durationMs,
+        status: "SUCCESS",
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      ConsolidationMetrics.recordExecution({
+        reportType: "INVENTORY_VALUATION",
+        tenantId: validTenantId,
+        durationMs,
+        status: "FAILURE",
+        cacheStatus: "MISS",
+      });
+
+      ConsolidationLogger.error("Failed to generate Consolidated Inventory Valuation", err, {
+        tenantId: validTenantId,
+        correlationId,
+        requestId,
+        durationMs,
+        component: "ConsolidationService",
+      });
+
+      if (err instanceof ConsolidationError) throw err;
+      throw new ConsolidationCalculationError(`Failed to generate inventory valuation: ${err instanceof Error ? err.message : String(err)}`, {
+        tenantId: validTenantId,
+        correlationId,
+      });
+    } finally {
+      ConsolidationMetrics.decrementActive();
     }
-
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-
-    const [branches, products, batches, inventoryLevels, recentSaleInvoices] = await Promise.all([
-      ConsolidationRepository.getBranches(tenantId),
-      ConsolidationRepository.getProductCatalog(tenantId),
-      ConsolidationRepository.getInventoryBatches(tenantId),
-      ConsolidationRepository.getBranchInventoryLevels(tenantId),
-      ConsolidationRepository.getInvoices(tenantId, 1, 1000, {
-        startDate: ninetyDaysAgo,
-        type: "SALE",
-      }),
-    ]);
-
-    const result = InventoryValuationCalculator.calculate(
-      inventoryLevels,
-      products,
-      batches,
-      branches,
-      recentSaleInvoices
-    );
-
-    // Cache with tenant-scoped key
-    await RedisConnectionManager.set(
-      cacheKey,
-      JSON.stringify(result),
-      "EX",
-      CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
-    );
-
-    return result;
   }
 
   /**
-   * AI Financial Insight Generational Pipeline with Gemini Fallbacks
+   * AI Financial Insight Generational Pipeline with Gemini Observability & Deterministic Fallbacks
    * Interprets statistical output without modifying financial figures
+   * Financial report delivery NEVER blocks on AI availability
    */
   static async generateAIInsights(
     balanceSheet: ConsolidatedBalanceSheet,
     incomeStatement: ConsolidatedIncomeStatement,
     inventory: ConsolidatedInventoryValuation
   ): Promise<AIConsolidationInsights> {
+    const aiStartTime = performance.now();
     const ai = await this.getGeminiClient();
 
     const summaryContext = {
@@ -330,13 +784,15 @@ export class ConsolidationService {
       deadStockCount: inventory.deadStock.length,
       topSlowProducts: inventory.slowMovingProducts
         .slice(0, 3)
-        .map(p => `${p.productName} (SKU: ${p.sku}) Units: ${p.totalStock}`),
+        .map(p => `${p.name} (SKU: ${p.sku}) Units: ${p.stockQuantity}`),
       warnings: inventory.deadStock
         .slice(0, 3)
-        .map(d => `${d.productName} has ${d.stockQuantity} dead units valued at $${d.tiedCapital}`),
+        .map(d => `${d.name} has ${d.stockQuantity} dead units valued at $${d.totalValue}`),
     };
 
     let generatedText = "";
+    let aiSuccess = false;
+
     if (ai) {
       try {
         const prompt = `
@@ -389,24 +845,40 @@ export class ConsolidationService {
         });
 
         generatedText = response.text || "";
+        aiSuccess = true;
       } catch (err) {
-        console.error("[GEMINI ERROR] Content generation failed, executing analytical rules pipeline:", err);
+        ConsolidationLogger.warn(
+          `[GEMINI OBSERVABILITY] AI content generation failed, switching to deterministic rule engine: ${err instanceof Error ? err.message : String(err)}`,
+          {
+            component: "ConsolidationService",
+          }
+        );
       }
     }
 
+    const aiDurationMs = Math.round((performance.now() - aiStartTime) * 100) / 100;
     const parsed = this.tryParse<AIConsolidationInsights>(generatedText);
+
     if (parsed) {
+      ConsolidationMetrics.recordAiCall(aiDurationMs, true, false);
+      ConsolidationLogger.info(`AI Financial Insights generated successfully in ${aiDurationMs}ms`, {
+        component: "ConsolidationService",
+        durationMs: aiDurationMs,
+      });
       return parsed;
     }
 
+    // AI Fallback executed
+    ConsolidationMetrics.recordAiCall(aiDurationMs, aiSuccess, true);
+
     // Deterministic Rule-Based Fallback
     const fallbackReorders = inventory.slowMovingProducts.slice(0, 3).map(p => ({
-      productId: p.productId,
+      productId: p.id,
       sku: p.sku,
-      productName: p.productName,
-      currentStock: p.totalStock,
-      reorderQuantity: Math.max(10, Math.round(p.totalStock * 0.5)),
-      percentageGap: p.totalStock < 10 ? 90 : 25,
+      productName: p.name,
+      currentStock: p.stockQuantity,
+      reorderQuantity: Math.max(10, Math.round(p.stockQuantity * 0.5)),
+      percentageGap: p.stockQuantity < 10 ? 90 : 25,
     }));
 
     return {
@@ -442,43 +914,122 @@ export class ConsolidationService {
     userId = "SYSTEM",
     forceRefresh = false
   ): Promise<ConsolidationSummary> {
-    const cacheKey = `${CONSOLIDATION_DEFAULTS.DASHBOARD_CACHE_KEY}:${tenantId}`;
-    if (!forceRefresh) {
-      const cached = await RedisConnectionManager.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached) as ConsolidationSummary;
+    const validTenantId = ConsolidationRepository.assertValidTenantId(tenantId);
+    const correlationId = getCorrelationId() || uuidv4();
+    const requestId = getRequestId() || uuidv4();
+    const startTime = performance.now();
+
+    ConsolidationMetrics.incrementActive();
+
+    try {
+      const cacheKey = `${CONSOLIDATION_DEFAULTS.DASHBOARD_CACHE_KEY}:${validTenantId}`;
+      if (!forceRefresh) {
+        const cached = await RedisConnectionManager.get(cacheKey);
+        if (cached) {
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const parsed = JSON.parse(cached) as ConsolidationSummary;
+
+          ConsolidationMetrics.recordExecution({
+            reportType: "MASTER_SUMMARY",
+            tenantId: validTenantId,
+            durationMs,
+            status: "SUCCESS",
+            cacheStatus: "HIT",
+          });
+
+          ConsolidationLogger.info("Consolidated Master Summary cache hit", {
+            tenantId: validTenantId,
+            correlationId,
+            requestId,
+            durationMs,
+            component: "ConsolidationService",
+          });
+
+          return parsed;
+        }
       }
+
+      const [balanceSheet, incomeStatement, inventory] = await Promise.all([
+        this.generateBalanceSheet(validTenantId, userId, forceRefresh),
+        this.generateIncomeStatement(validTenantId, userId, forceRefresh),
+        this.generateInventoryValuation(validTenantId, forceRefresh),
+      ]);
+
+      const insights = await this.generateAIInsights(balanceSheet, incomeStatement, inventory);
+
+      const result: ConsolidationSummary = {
+        runId: uuidv4(),
+        timestamp: new Date().toISOString(),
+        aggregateRevenue: incomeStatement.revenue,
+        aggregateNetIncome: incomeStatement.netIncome,
+        aggregateAssets: balanceSheet.assets.totalAssets,
+        aggregateLiabilities: balanceSheet.liabilities.totalLiabilities,
+        aggregateEquity: balanceSheet.equity.totalEquity,
+        aggregateInventoryValue: inventory.totalInventoryValue,
+        totalEliminationsDone: balanceSheet.eliminations.length + incomeStatement.eliminations.length,
+        activeBranchesCount: Object.keys(balanceSheet.branchBreakdown).length,
+        insights,
+      };
+
+      await RedisConnectionManager.set(
+        cacheKey,
+        JSON.stringify(result),
+        "EX",
+        CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
+      );
+
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      const fingerprint = ConsolidationAuditService.generateFingerprint(result);
+
+      // Non-blocking Audit Logging
+      await ConsolidationAuditService.recordAuditEvent({
+        correlationId,
+        requestId,
+        tenantId: validTenantId,
+        userId,
+        action: "GENERATE_MASTER_SUMMARY",
+        reportType: "MASTER_SUMMARY",
+        status: "SUCCESS",
+        durationMs,
+        parameters: { forceRefresh },
+        resultFingerprint: fingerprint,
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      ConsolidationMetrics.recordExecution({
+        reportType: "MASTER_SUMMARY",
+        tenantId: validTenantId,
+        durationMs,
+        status: "SUCCESS",
+        cacheStatus: forceRefresh ? "BYPASS" : "MISS",
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+      ConsolidationMetrics.recordExecution({
+        reportType: "MASTER_SUMMARY",
+        tenantId: validTenantId,
+        durationMs,
+        status: "FAILURE",
+        cacheStatus: "MISS",
+      });
+
+      ConsolidationLogger.error("Failed to generate Consolidated Master Summary", err, {
+        tenantId: validTenantId,
+        correlationId,
+        requestId,
+        durationMs,
+        component: "ConsolidationService",
+      });
+
+      if (err instanceof ConsolidationError) throw err;
+      throw new ConsolidationCalculationError(`Failed to generate master summary: ${err instanceof Error ? err.message : String(err)}`, {
+        tenantId: validTenantId,
+        correlationId,
+      });
+    } finally {
+      ConsolidationMetrics.decrementActive();
     }
-
-    const [balanceSheet, incomeStatement, inventory] = await Promise.all([
-      this.generateBalanceSheet(tenantId, userId, forceRefresh),
-      this.generateIncomeStatement(tenantId, userId, forceRefresh),
-      this.generateInventoryValuation(tenantId, forceRefresh),
-    ]);
-
-    const insights = await this.generateAIInsights(balanceSheet, incomeStatement, inventory);
-
-    const result: ConsolidationSummary = {
-      runId: uuidv4(),
-      timestamp: new Date().toISOString(),
-      aggregateRevenue: incomeStatement.revenue,
-      aggregateNetIncome: incomeStatement.netIncome,
-      aggregateAssets: balanceSheet.assets.totalAssets,
-      aggregateLiabilities: balanceSheet.liabilities.totalLiabilities,
-      aggregateEquity: balanceSheet.equity.totalEquity,
-      aggregateInventoryValue: inventory.totalInventoryValue,
-      totalEliminationsDone: balanceSheet.eliminations.length + incomeStatement.eliminations.length,
-      activeBranchesCount: Object.keys(balanceSheet.branchBreakdown).length,
-      insights,
-    };
-
-    await RedisConnectionManager.set(
-      cacheKey,
-      JSON.stringify(result),
-      "EX",
-      CONSOLIDATION_DEFAULTS.CACHE_TTL_SECONDS
-    );
-
-    return result;
   }
 }
