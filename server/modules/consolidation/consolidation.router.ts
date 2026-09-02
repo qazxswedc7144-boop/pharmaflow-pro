@@ -3,6 +3,7 @@
 import { Router, Response } from "express";
 import { authenticateToken, requireRoles, AuthenticatedRequest } from "../../middleware/auth.middleware";
 import { ConsolidationService } from "./consolidation.service";
+import { getCurrentTenantId } from "../../context/tenantContext";
 import { Role } from "@prisma/client";
 
 const router = Router();
@@ -12,15 +13,24 @@ const permittedRoles: Role[] = [Role.ADMIN, Role.ACCOUNTANT, Role.AUDITOR];
 
 const rbacGuards = [authenticateToken, requireRoles(permittedRoles)];
 
+function resolveTenantId(req: AuthenticatedRequest): string {
+  const tenantId = req.user?.tenantId || (req as any).tenantId || (req.headers["x-tenant-id"] as string) || getCurrentTenantId();
+  if (!tenantId || !tenantId.trim()) {
+    throw new Error("Zero Data Leak: A valid tenantId is required for financial consolidation.");
+  }
+  return tenantId.trim();
+}
+
 /**
  * GET /api/consolidation/summary
  * Retrieves master group financial summary
  */
 router.get("/summary", rbacGuards, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = resolveTenantId(req);
     const force = req.query.refresh === "true";
     const userId = req.user?.userId || "SYSTEM";
-    const summary = await ConsolidationService.generateMasterConsolidationSummary(userId, force);
+    const summary = await ConsolidationService.generateMasterConsolidationSummary(tenantId, userId, force);
     res.json(summary);
   } catch (err: any) {
     console.error("[CONSOLIDATION API Error summary]:", err);
@@ -37,9 +47,10 @@ router.get("/summary", rbacGuards, async (req: AuthenticatedRequest, res: Respon
  */
 router.get("/balance-sheet", rbacGuards, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = resolveTenantId(req);
     const force = req.query.refresh === "true";
     const userId = req.user?.userId || "SYSTEM";
-    const balanceSheet = await ConsolidationService.generateBalanceSheet(userId, force);
+    const balanceSheet = await ConsolidationService.generateBalanceSheet(tenantId, userId, force);
     res.json(balanceSheet);
   } catch (err: any) {
     console.error("[CONSOLIDATION API Error balance-sheet]:", err);
@@ -56,9 +67,10 @@ router.get("/balance-sheet", rbacGuards, async (req: AuthenticatedRequest, res: 
  */
 router.get("/income-statement", rbacGuards, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = resolveTenantId(req);
     const force = req.query.refresh === "true";
     const userId = req.user?.userId || "SYSTEM";
-    const incomeStatement = await ConsolidationService.generateIncomeStatement(userId, force);
+    const incomeStatement = await ConsolidationService.generateIncomeStatement(tenantId, userId, force);
     res.json(incomeStatement);
   } catch (err: any) {
     console.error("[CONSOLIDATION API Error income-statement]:", err);
@@ -75,9 +87,10 @@ router.get("/income-statement", rbacGuards, async (req: AuthenticatedRequest, re
  */
 router.get("/cash-flow", rbacGuards, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = resolveTenantId(req);
     const force = req.query.refresh === "true";
     const userId = req.user?.userId || "SYSTEM";
-    const cashFlow = await ConsolidationService.generateCashFlow(userId, force);
+    const cashFlow = await ConsolidationService.generateCashFlow(tenantId, userId, force);
     res.json(cashFlow);
   } catch (err: any) {
     console.error("[CONSOLIDATION API Error cash-flow]:", err);
@@ -94,9 +107,10 @@ router.get("/cash-flow", rbacGuards, async (req: AuthenticatedRequest, res: Resp
  */
 router.get("/trial-balance", rbacGuards, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = resolveTenantId(req);
     const force = req.query.refresh === "true";
     const userId = req.user?.userId || "SYSTEM";
-    const trialBalance = await ConsolidationService.generateTrialBalance(userId, force);
+    const trialBalance = await ConsolidationService.generateTrialBalance(tenantId, userId, force);
     res.json(trialBalance);
   } catch (err: any) {
     console.error("[CONSOLIDATION API Error trial-balance]:", err);
@@ -113,8 +127,9 @@ router.get("/trial-balance", rbacGuards, async (req: AuthenticatedRequest, res: 
  */
 router.get("/inventory", rbacGuards, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = resolveTenantId(req);
     const force = req.query.refresh === "true";
-    const inventory = await ConsolidationService.generateInventoryValuation(force);
+    const inventory = await ConsolidationService.generateInventoryValuation(tenantId, force);
     res.json(inventory);
   } catch (err: any) {
     console.error("[CONSOLIDATION API Error inventory]:", err);
