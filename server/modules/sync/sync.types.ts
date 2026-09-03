@@ -38,6 +38,7 @@ export type SyncMutationStatus =
   | "DUPLICATE"
   | "CONFLICT"
   | "REJECTED"
+  | "FAILED"
   | "RETRY"
   | "INVALID"
   | "UNAUTHORIZED";
@@ -96,6 +97,7 @@ export interface PerMutationResult {
   status: SyncMutationStatus;
   success?: boolean;
   errorCode?: string;
+  error?: string;
   serverVersion?: number;
   conflict?: {
     category: SyncConflictCategory;

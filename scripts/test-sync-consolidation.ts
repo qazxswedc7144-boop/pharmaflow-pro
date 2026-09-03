@@ -30,10 +30,12 @@ if (typeof global.window === 'undefined') {
   (global as any).window = {
     addEventListener: () => {},
     removeEventListener: () => {},
+    dispatchEvent: () => true,
     localStorage: (global as any).localStorage,
     location: { origin: 'http://localhost:3000' }
   };
 } else {
+  (global as any).window.dispatchEvent = (global as any).window.dispatchEvent || (() => true);
   (global as any).window.localStorage = (global as any).localStorage;
   (global as any).window.location = { origin: 'http://localhost:3000' };
 }
@@ -272,6 +274,18 @@ async function runTests() {
 
   // Mock fetch to simulate 401 on first attempt, then success after refresh
   (global as any).fetch = async (url: string, init?: any) => {
+    if (url.includes('/api/auth/refresh')) {
+      refreshAttemptCount++;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          accessToken: 'rotated_access_token_777',
+          refreshToken: 'rotated_refresh_token_888',
+          user: { id: 'usr_test_101', email: 'test@pharmaflow.local' }
+        })
+      };
+    }
     if (url.includes('/api/v1/sync/push')) {
       attempt401Count++;
       if (attempt401Count === 1) {

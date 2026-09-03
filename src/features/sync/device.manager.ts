@@ -28,6 +28,24 @@ export class DeviceManager {
       };
     }
 
+    if (typeof localStorage !== "undefined") {
+      try {
+        const raw = localStorage.getItem(DEVICE_STORAGE_KEY);
+        if (raw) {
+          const stored = JSON.parse(raw);
+          if (stored && stored.deviceId) {
+            this.cachedIdentity = {
+              ...stored,
+              tenantId: session.tenantId || stored.tenantId,
+              branchId: session.branchId || stored.branchId,
+              userId: session.userId || stored.userId
+            };
+            return this.cachedIdentity!;
+          }
+        }
+      } catch {}
+    }
+
     try {
       const stored = configurationService.getSync<DeviceMetadata>(DEVICE_STORAGE_KEY);
       if (stored && stored.deviceId) {
@@ -64,10 +82,10 @@ export class DeviceManager {
       lastSeenAt: new Date().toISOString()
     };
 
-    try {
-      configurationService.set(DEVICE_STORAGE_KEY, identity).catch(() => {});
-    } catch (err) {
-      console.warn("[DeviceManager] Error persisting device identity:", err);
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(identity));
+      } catch {}
     }
 
     this.cachedIdentity = identity;

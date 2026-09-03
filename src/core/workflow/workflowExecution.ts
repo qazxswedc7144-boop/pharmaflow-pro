@@ -121,6 +121,24 @@ export class WorkflowExecutionPipeline {
         result: domainResult
       });
 
+      try {
+        const { DistributedSyncEngine } = await import('@/features/sync/sync.engine');
+        await DistributedSyncEngine.getInstance().enqueue(
+          workflow.operationType,
+          {
+            id: (domainResult as any)?.refId || ctx.workflowId,
+            ...(typeof domainResult === 'object' && domainResult !== null ? domainResult : {}),
+            workflowId: ctx.workflowId,
+            operationType: workflow.operationType
+          },
+          workflow.id.toUpperCase(),
+          ctx.idempotencyKey,
+          { tenantId: ctx.tenantId, branchId: ctx.branchId }
+        );
+      } catch (syncErr) {
+        console.warn('[WorkflowExecutionPipeline] Sync enqueue non-blocking notification:', syncErr);
+      }
+
       // Step 15: After Execute & After Commit Hooks
       await WorkflowHooksRunner.runHook(workflow.hooks?.afterExecute, domainResult, ctx, 'afterExecute');
       await WorkflowHooksRunner.runHook(workflow.hooks?.afterCommit, domainResult, ctx, 'afterCommit');

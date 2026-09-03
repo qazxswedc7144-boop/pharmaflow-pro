@@ -14,7 +14,13 @@ export type SyncStatus =
   | "CONFLICT" 
   | "DUPLICATE" 
   | "REJECTED" 
-  | "UNAUTHORIZED";
+  | "UNAUTHORIZED"
+  | "LOCAL_ONLY"
+  | "PENDING_SYNC"
+  | "SYNCING"
+  | "SYNCED"
+  | "RETRY_PENDING"
+  | "DEAD_LETTER";
 
 export type MutationOperation = "CREATE" | "UPDATE" | "DELETE" | "POST" | "CANCEL" | "ADJUST";
 

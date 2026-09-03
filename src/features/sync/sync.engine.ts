@@ -276,7 +276,11 @@ export class DistributedSyncEngine {
     let addedId: number | undefined = undefined;
 
     try {
-      await (this.db as any).transaction('rw', [this.db.syncQueue, (this.db as any).outbox], async () => {
+      const txTables = [this.db.syncQueue];
+      if ((this.db as any).outbox && (this.db as any).outbox.schema) {
+        txTables.push((this.db as any).outbox);
+      }
+      await (this.db as any).transaction('rw', txTables, async () => {
         if (this.db.syncQueue) {
           try {
             addedId = await this.db.syncQueue.add(queueItem);
@@ -289,7 +293,7 @@ export class DistributedSyncEngine {
             }
           }
         }
-        if ((this.db as any).outbox) {
+        if ((this.db as any).outbox && (this.db as any).outbox.schema) {
           try {
             await (this.db as any).outbox.add(outboxEvent);
           } catch (err: any) {
@@ -307,6 +311,139 @@ export class DistributedSyncEngine {
       console.error("[DistributedSyncEngine] Atomic Enqueue Failed:", error);
       throw error;
     }
+  }
+
+  /**
+   * Transactional Outbox Enqueue:
+   * Writes the mutation directly to syncQueue and outbox within an already active caller transaction.
+   * Ensures business writes and outbox records commit or roll back together atomically.
+   */
+  public async enqueueWithinTransaction(
+    type: string, 
+    payload: Record<string, unknown>, 
+    entityType: string = 'generic', 
+    customIdempotencyKey?: string,
+    options?: { tenantId?: string; branchId?: string }
+  ): Promise<{ mutationId: string; idempotencyKey: string; queueItemId?: number }> {
+    const mutationId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+    const timestamp = new Date().toISOString();
+    const session = getCurrentUserSession();
+    
+    const tenantId = options?.tenantId || session.tenantId || 'tenant_default';
+    const branchId = options?.branchId || session.branchId || 'branch_default';
+    const version = (payload?.version as number) || 1;
+    const entityId = (payload?.id as string) || 'unknown';
+    
+    const idempotencyKey = customIdempotencyKey || this.generateIdempotencyKey(entityType, entityId, type, version, branchId);
+    const sanitizedPayload = this.sanitizePayload(payload) || {};
+
+    const queueItem: LocalSyncQueueItem = {
+      mutationId,
+      tenantId,
+      branchId,
+      deviceId: DeviceManager.getDeviceIdentity().deviceId,
+      userId: session.userId,
+      entityType,
+      operationType: (type === 'DELETE' ? 'DELETE' : 'CREATE') as any,
+      payload: sanitizedPayload,
+      syncStatus: 'PENDING',
+      retryCount: 0,
+      idempotencyKey,
+      version,
+      logicalTimestamp: Date.now(),
+      actorId: session.userId || 'system',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+
+    const outboxEvent = {
+      mutationId,
+      tenantId,
+      type,
+      payload: sanitizedPayload,
+      status: 'PENDING',
+      retries: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      idempotencyKey,
+      entityType
+    };
+
+    let addedId: number | undefined = undefined;
+
+    if (this.db.syncQueue) {
+      const existing = await this.db.syncQueue.where('idempotencyKey').equals(idempotencyKey).first();
+      if (existing) {
+        addedId = existing.id;
+      } else {
+        try {
+          addedId = await this.db.syncQueue.add(queueItem);
+        } catch (err: any) {
+          if (err && (err.name === 'ConstraintError' || err instanceof Dexie.ConstraintError)) {
+            const recheck = await this.db.syncQueue.where('idempotencyKey').equals(idempotencyKey).first();
+            if (recheck) {
+              addedId = recheck.id;
+            }
+          }
+        }
+      }
+    }
+
+    const currentTx = (Dexie as any).currentTransaction;
+    const canWriteOutbox = (this.db as any).outbox && (this.db as any).outbox.schema && 
+      (!currentTx || (currentTx.tables && (currentTx.tables['outbox'] || (Array.isArray(currentTx.tables) && currentTx.tables.some((t: any) => t.name === 'outbox')))));
+    if (canWriteOutbox) {
+      try {
+        await (this.db as any).outbox.add(outboxEvent);
+      } catch (err: any) {
+        // Ignore duplicate constraint for outbox
+      }
+    }
+
+    return { mutationId, idempotencyKey, queueItemId: addedId };
+  }
+
+  /**
+   * Returns complete queue statistics and health overview
+   */
+  public async getSyncMetrics(): Promise<{
+    pendingCount: number;
+    processingCount: number;
+    failedCount: number;
+    conflictCount: number;
+    rejectedCount: number;
+    isOnline: boolean;
+    isProcessing: boolean;
+    lastSyncTimestamp?: string;
+  }> {
+    let pendingCount = 0;
+    let processingCount = 0;
+    let failedCount = 0;
+    let conflictCount = 0;
+    let rejectedCount = 0;
+
+    if (this.db.syncQueue) {
+      const items = await this.db.syncQueue.toArray().catch(() => []);
+      for (const it of items) {
+        const s = it.syncStatus?.toUpperCase();
+        if (s === 'PENDING') pendingCount++;
+        else if (s === 'PROCESSING') processingCount++;
+        else if (s === 'FAILED') failedCount++;
+        else if (s === 'CONFLICT') conflictCount++;
+        else if (s === 'REJECTED') rejectedCount++;
+      }
+    }
+
+    return {
+      pendingCount,
+      processingCount,
+      failedCount,
+      conflictCount,
+      rejectedCount,
+      isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+      isProcessing: this.isProcessing,
+      lastSyncTimestamp: this.lastSyncTimestamp ? new Date(this.lastSyncTimestamp).toISOString() : undefined
+    };
   }
 
   /**
@@ -741,12 +878,29 @@ export class DistributedSyncEngine {
 
         throw new Error(`Server returned status: ${response.status}`);
 
-      } catch (error) {
+      } catch (error: any) {
         mutation.retryCount++;
-        await this.db.syncQueue.update(mutation.id!, { retryCount: mutation.retryCount, updatedAt: new Date() });
+        const isDeadLetter = mutation.retryCount > SYNC_CONFIG.MAX_RETRY_ATTEMPTS;
+        await this.db.syncQueue.update(mutation.id!, { 
+          retryCount: mutation.retryCount, 
+          syncStatus: isDeadLetter ? 'FAILED' : 'RETRY_PENDING',
+          lastError: error.message || 'Sync network/processing failure',
+          updatedAt: new Date() 
+        });
 
-        if (mutation.retryCount > SYNC_CONFIG.MAX_RETRY_ATTEMPTS) {
-          await this.db.syncQueue.update(mutation.id!, { syncStatus: 'FAILED', updatedAt: new Date() });
+        if (isDeadLetter) {
+          try {
+            await this.db.failedMutations.add({
+              mutationId: mutation.mutationId,
+              reason: `DEAD_LETTER_MAX_RETRIES_EXCEEDED: ${error.message || 'Network error'}`,
+              payload: mutation.payload,
+              tenantId: mutation.tenantId,
+              branchId: mutation.branchId,
+              createdAt: new Date(),
+            });
+          } catch {
+            // Non-blocking DLQ logging
+          }
           return;
         }
 

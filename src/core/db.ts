@@ -1501,6 +1501,9 @@ function wrapTable(realTable: any, tableName: string): any {
             const res = boundFn(...args);
             if (res && typeof res.then === 'function') {
               return res.catch((err: any) => {
+                if (err && (err.name === 'ConstraintError' || err.name === 'BulkError' || err.inner?.name === 'ConstraintError')) {
+                  throw err;
+                }
                 console.warn(`[DB RESILIENT] Promised operation failure on table "${tableName}":`, err);
                 isDbBlocked = true;
                 const mockTable = getMockTable(tableName);
@@ -1512,7 +1515,10 @@ function wrapTable(realTable: any, tableName: string): any {
               return wrapQueryChain(res, tableName);
             }
             return res;
-          } catch (err) {
+          } catch (err: any) {
+            if (err && (err.name === 'ConstraintError' || err.name === 'BulkError' || err.inner?.name === 'ConstraintError')) {
+              throw err;
+            }
             console.warn(`[DB RESILIENT] Table operation "${String(tProp)}" failed on table "${tableName}":`, err);
             isDbBlocked = true;
             const mockTable = getMockTable(tableName);
@@ -1726,12 +1732,23 @@ export const dbProxy = new Proxy({} as any, {
         };
         rawTableArgs.forEach(extractTableNames);
 
+        let opThrew = false;
+        let thrownError: any = null;
         try {
           const validTables = tableNames.length > 0 ? tableNames : (target.tables ? target.tables.map(t => t.name) : ALL_SCHEMA_TABLE_NAMES);
           return await target.transaction(mode, validTables, async (tx: any) => {
-            return operation ? await operation(tx) : undefined;
+            try {
+              return operation ? await operation(tx) : undefined;
+            } catch (err) {
+              opThrew = true;
+              thrownError = err;
+              throw err;
+            }
           });
         } catch (txErr) {
+          if (opThrew) {
+            throw thrownError;
+          }
           console.warn("[DB Proxy] Transaction error, falling back to direct execution:", txErr);
           isDbBlocked = true;
           return operation ? await operation({} as any) : undefined;
@@ -1752,12 +1769,36 @@ export const dbProxy = new Proxy({} as any, {
         if (isDbBlocked) {
           return operation ? await operation({} as any) : undefined;
         }
+        let opThrew = false;
+        let thrownError: any = null;
         try {
           if (typeof (target as any)[prop] === 'function') {
-            return await (target as any)[prop].bind(target)(modeOrOp, tablesOrOp, op);
+            const wrappedOp = typeof modeOrOp === 'function' ? async (tx: any) => {
+              try {
+                return await modeOrOp(tx);
+              } catch (e) {
+                opThrew = true;
+                thrownError = e;
+                throw e;
+              }
+            } : (op ? async (tx: any) => {
+              try {
+                return await op(tx);
+              } catch (e) {
+                opThrew = true;
+                thrownError = e;
+                throw e;
+              }
+            } : undefined);
+
+            const effectiveArgs = typeof modeOrOp === 'function' ? [wrappedOp] : [modeOrOp, tablesOrOp, wrappedOp];
+            return await (target as any)[prop].apply(target, effectiveArgs);
           }
           return operation ? await operation({} as any) : undefined;
         } catch (txErr) {
+          if (opThrew) {
+            throw thrownError;
+          }
           console.warn("[DB Proxy] safeTransaction error, falling back to direct execution:", txErr);
           isDbBlocked = true;
           return operation ? await operation({} as any) : undefined;

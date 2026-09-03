@@ -57,7 +57,7 @@ export class ConfigurationSyncService {
       });
 
       // Dispatch sync wakeup
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent !== 'undefined') {
         window.dispatchEvent(new CustomEvent('SYNC_WAKEUP'));
       }
     } catch (err) {
