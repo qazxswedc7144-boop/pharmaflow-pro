@@ -3,6 +3,7 @@ import { Router, Response } from "express";
 import { authenticateToken, AuthenticatedRequest } from "../middleware/auth.middleware";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../database/prisma";
+import { ServerAIPromptGuard } from "../services/ai-prompt-guard";
 
 export const aiRouter = Router();
 
@@ -21,6 +22,25 @@ const aiRateLimiter = rateLimit({
 
 // Apply rate limiter to all secure AI actions
 aiRouter.use(aiRateLimiter);
+
+// Tenant-wide logical quota limiter (sliding 1-minute window across all tenant users)
+const MAX_TENANT_REQUESTS_PER_MINUTE = 60;
+
+async function checkTenantQuota(tenantId: string): Promise<boolean> {
+  try {
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+    const count = await prisma.aiUsageLog.count({
+      where: {
+        tenantId,
+        timestamp: { gte: oneMinuteAgo },
+      },
+    });
+    return count < MAX_TENANT_REQUESTS_PER_MINUTE;
+  } catch (err) {
+    // If DB check fails, fail open so business ERP operations are never blocked
+    return true;
+  }
+}
 
 // Lazy initialization of GoogleGenAI client (avoids crashing on startup if credentials are not set)
 let aiInstance: any = null;
@@ -135,7 +155,7 @@ const GOOGLE_PLAY_COMPLIANCE_INSTRUCTION =
  */
 aiRouter.post("/generate-content", authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { model, contents, config } = req.body;
+    const { model, contents, config, tenantId: bodyTenantId } = req.body;
     
     // 3. Enforce user and tenant isolation parameters. Reject anonymous requests.
     const tenantId = req.user?.tenantId;
@@ -145,6 +165,42 @@ aiRouter.post("/generate-content", authenticateToken, async (req: AuthenticatedR
       return res.status(401).json({
         error: "AUTHENTICATION_REQUIRED",
         message: "لم يتم التحقق من صحة المستخدم أو الشركة (Tenant). يرجى تسجيل الدخول أولاً لتفعيل نظام التحليل المعزول."
+      });
+    }
+
+    // Tenant Mismatch Prevention: Body tenantId must strictly match authenticated JWT
+    if (bodyTenantId && bodyTenantId !== tenantId) {
+      return res.status(403).json({
+        error: "TENANT_MISMATCH",
+        message: "تعارض أمني: عدم تطابق معرف المنشأة مع الجلسة المصادق عليها."
+      });
+    }
+
+    // 5. Add Prompt Length Protection and reject oversized prompts.
+    const promptText = extractTextFromContents(contents);
+    if (promptText.length > MAX_PROMPT_CHAR_LIMIT) {
+      return res.status(400).json({
+        error: "PROMPT_SIZE_EXCEEDED",
+        message: `لقد تجاوز مدخل الطلب الحد الأقصى المسموح به وهو ${MAX_PROMPT_CHAR_LIMIT} حرفاً لحماية خوادم المؤسسة.`
+      });
+    }
+
+    // 6. Server-Side Prompt Injection Defense
+    const promptInspection = ServerAIPromptGuard.inspectPrompt(promptText);
+    if (!promptInspection.isClean) {
+      return res.status(400).json({
+        error: "PROMPT_INJECTION_DETECTED",
+        message: promptInspection.rejectionReason,
+        violations: promptInspection.violations
+      });
+    }
+
+    // 7. Tenant-Wide Logical Quota Check
+    const hasQuota = await checkTenantQuota(tenantId);
+    if (!hasQuota) {
+      return res.status(429).json({
+        error: "TENANT_QUOTA_EXCEEDED",
+        message: "تم بلوغ الحد الأقصى لاستهلاك الذكاء الاصطناعي للمنشأة (Tenant Quota). يرجى الانتظار دقيقة واحدة."
       });
     }
 
@@ -162,15 +218,6 @@ aiRouter.post("/generate-content", authenticateToken, async (req: AuthenticatedR
           }
         ],
         offline: true
-      });
-    }
-
-    // 5. Add Prompt Length Protection and reject oversized prompts.
-    const promptText = extractTextFromContents(contents);
-    if (promptText.length > MAX_PROMPT_CHAR_LIMIT) {
-      return res.status(400).json({
-        error: "PROMPT_SIZE_EXCEEDED",
-        message: `لقد تجاوز مدخل الطلب الحد الأقصى المسموح به وهو ${MAX_PROMPT_CHAR_LIMIT} حرفاً لحماية خوادم المؤسسة.`
       });
     }
 
@@ -244,14 +291,57 @@ aiRouter.post("/generate-content", authenticateToken, async (req: AuthenticatedR
 
 /**
  * POST /api/ai/generate
- * Unified server endpoint for GeminiGateway calls
+ * Unified server endpoint for GeminiGateway calls with authentication and safety guard
  */
-aiRouter.post("/generate", async (req, res) => {
+aiRouter.post("/generate", authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { model, systemInstruction, prompt, temperature } = req.body;
+    const { model, systemInstruction, prompt, temperature, tenantId: bodyTenantId } = req.body;
+
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+
+    if (!tenantId || !userId) {
+      return res.status(401).json({
+        error: "AUTHENTICATION_REQUIRED",
+        message: "لم يتم التحقق من صحة المستخدم أو الشركة (Tenant)."
+      });
+    }
+
+    if (bodyTenantId && bodyTenantId !== tenantId) {
+      return res.status(403).json({
+        error: "TENANT_MISMATCH",
+        message: "تعارض أمني: عدم تطابق معرف المنشأة مع الجلسة المصادق عليها."
+      });
+    }
 
     if (!prompt) {
       return res.status(400).json({ message: "الطلب (prompt) مطلوب لخدمة الذكاء الاصطناعي." });
+    }
+
+    if (prompt.length > MAX_PROMPT_CHAR_LIMIT) {
+      return res.status(400).json({
+        error: "PROMPT_SIZE_EXCEEDED",
+        message: `لقد تجاوز مدخل الطلب الحد الأقصى المسموح به وهو ${MAX_PROMPT_CHAR_LIMIT} حرفاً.`
+      });
+    }
+
+    // Prompt injection check
+    const promptInspection = ServerAIPromptGuard.inspectPrompt(prompt);
+    if (!promptInspection.isClean) {
+      return res.status(400).json({
+        error: "PROMPT_INJECTION_DETECTED",
+        message: promptInspection.rejectionReason,
+        violations: promptInspection.violations
+      });
+    }
+
+    // Tenant-wide quota check
+    const hasQuota = await checkTenantQuota(tenantId);
+    if (!hasQuota) {
+      return res.status(429).json({
+        error: "TENANT_QUOTA_EXCEEDED",
+        message: "تم بلوغ الحد الأقصى لاستهلاك الذكاء الاصطناعي للمنشأة (Tenant Quota). يرجى الانتظار دقيقة واحدة."
+      });
     }
 
     const hasKey = !!process.env.GEMINI_API_KEY;
@@ -281,6 +371,22 @@ aiRouter.post("/generate", async (req, res) => {
       completionTokens = response.usageMetadata.candidatesTokenCount || completionTokens;
     }
 
+    const estimatedCost = calculateCost(promptTokens, completionTokens, targetModel);
+    try {
+      await prisma.aiUsageLog.create({
+        data: {
+          tenantId,
+          userId,
+          model: targetModel,
+          tokensIn: promptTokens,
+          tokensOut: completionTokens,
+          estimatedCost,
+        }
+      });
+    } catch {
+      // background tracking failure ignored
+    }
+
     return res.json({
       text: response.text || "",
       usage: { promptTokens, completionTokens }
@@ -297,9 +403,28 @@ aiRouter.post("/generate", async (req, res) => {
  * POST /api/ai/stream
  * Server-Sent Events (SSE) streaming endpoint for Gemini AI responses
  */
-aiRouter.post("/stream", async (req, res): Promise<void> => {
+aiRouter.post("/stream", authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { model, systemInstruction, prompt, temperature } = req.body;
+    const { model, systemInstruction, prompt, temperature, tenantId: bodyTenantId } = req.body;
+
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+
+    if (!tenantId || !userId) {
+      res.status(401).json({
+        error: "AUTHENTICATION_REQUIRED",
+        message: "لم يتم التحقق من صحة المستخدم أو الشركة (Tenant)."
+      });
+      return;
+    }
+
+    if (bodyTenantId && bodyTenantId !== tenantId) {
+      res.status(403).json({
+        error: "TENANT_MISMATCH",
+        message: "تعارض أمني: عدم تطابق معرف المنشأة مع الجلسة المصادق عليها."
+      });
+      return;
+    }
 
     if (!prompt) {
       res.status(400).json({ success: false, errorCode: "MISSING_PROMPT", message: "الطلب (prompt) مطلوب لخدمة البث." });
@@ -308,6 +433,25 @@ aiRouter.post("/stream", async (req, res): Promise<void> => {
 
     if (prompt.length > MAX_PROMPT_CHAR_LIMIT) {
       res.status(400).json({ success: false, errorCode: "PROMPT_SIZE_EXCEEDED", message: "تجاوز نص الطلب الحد المسموح به." });
+      return;
+    }
+
+    const promptInspection = ServerAIPromptGuard.inspectPrompt(prompt);
+    if (!promptInspection.isClean) {
+      res.status(400).json({
+        error: "PROMPT_INJECTION_DETECTED",
+        message: promptInspection.rejectionReason,
+        violations: promptInspection.violations
+      });
+      return;
+    }
+
+    const hasQuota = await checkTenantQuota(tenantId);
+    if (!hasQuota) {
+      res.status(429).json({
+        error: "TENANT_QUOTA_EXCEEDED",
+        message: "تم بلوغ الحد الأقصى لاستهلاك الذكاء الاصطناعي للمنشأة (Tenant Quota)."
+      });
       return;
     }
 

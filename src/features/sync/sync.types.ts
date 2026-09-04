@@ -34,7 +34,10 @@ export type SyncConflictCategory =
   | "TENANT_CONFLICT"
   | "PERMISSION_CONFLICT"
   | "DELETED_RECORD_CONFLICT"
-  | "SCHEMA_VERSION_CONFLICT";
+  | "SCHEMA_VERSION_CONFLICT"
+  | "IMMUTABLE_FINANCIAL_CONFLICT"
+  | "CONCURRENT_OFFLINE_CONFLICT"
+  | "SEQUENCE_GAP_DETECTED";
 
 export type ReportingSyncTag =
   | "LOCAL_UNSYNCED"
@@ -110,11 +113,16 @@ export interface NetworkState {
 
 export interface DeviceMetadata {
   deviceId: string;
+  installationId?: string;
   deviceName: string;
   tenantId: string;
   branchId: string;
   userId: string;
-  status: "ACTIVE" | "REVOKED" | "SUSPENDED" | "UNKNOWN";
+  status: "ACTIVE" | "REVOKED" | "SUSPENDED" | "OFFLINE" | "SYNCING" | "STALE" | "UNKNOWN";
+  syncHealth?: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "STALE";
+  lastSyncedSequence?: number;
+  lastAcknowledgedSequence?: number;
+  versionVector?: Record<string, number>;
   registeredAt?: string;
   lastSeenAt?: string;
 }

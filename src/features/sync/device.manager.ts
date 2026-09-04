@@ -73,11 +73,16 @@ export class DeviceManager {
 
     const identity: DeviceMetadata = {
       deviceId: newDeviceId,
+      installationId: `INST-${newDeviceId}`,
       deviceName,
       tenantId: session.tenantId || "default-tenant",
       branchId: session.branchId || "default-branch",
       userId: session.userId || "default-user",
       status: "ACTIVE",
+      syncHealth: "HEALTHY",
+      lastSyncedSequence: 0,
+      lastAcknowledgedSequence: 0,
+      versionVector: { [newDeviceId]: 0 },
       registeredAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString()
     };
@@ -90,6 +95,43 @@ export class DeviceManager {
 
     this.cachedIdentity = identity;
     return identity;
+  }
+
+  /**
+   * Updates local sequence cursors for this device
+   */
+  static updateSequence(syncedSequence?: number, ackSequence?: number): void {
+    const identity = this.getDeviceIdentity();
+    if (syncedSequence !== undefined) {
+      identity.lastSyncedSequence = Math.max(identity.lastSyncedSequence || 0, syncedSequence);
+    }
+    if (ackSequence !== undefined) {
+      identity.lastAcknowledgedSequence = Math.max(identity.lastAcknowledgedSequence || 0, ackSequence);
+    }
+    identity.lastSeenAt = new Date().toISOString();
+    this.cachedIdentity = identity;
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(identity));
+      } catch {}
+    }
+  }
+
+  /**
+   * Updates version vector for this device
+   */
+  static updateVersionVector(vector: Record<string, number>): void {
+    const identity = this.getDeviceIdentity();
+    identity.versionVector = {
+      ...(identity.versionVector || {}),
+      ...vector
+    };
+    this.cachedIdentity = identity;
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(identity));
+      } catch {}
+    }
   }
 
   /**

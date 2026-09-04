@@ -550,9 +550,15 @@ export class DistributedSyncEngine {
           }
 
           if (Array.isArray(data.changes) && data.changes.length > 0) {
-            for (const change of data.changes) {
+            // Sort changes by cursor to guarantee monotonic sequence
+            const sortedChanges = [...data.changes].sort((a, b) => (Number(a.cursor) || 0) - (Number(b.cursor) || 0));
+
+            for (const change of sortedChanges) {
               await this.applyServerChange(change);
             }
+
+            // Update persistent device sequence tracking
+            DeviceManager.updateSequence(this.lastPulledCursor, this.lastPulledCursor);
           }
 
           if (data.delta) {

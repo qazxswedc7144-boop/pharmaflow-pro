@@ -435,6 +435,16 @@ export class SyncProcessorService {
       }
     }
 
+    // 6.5. UPDATE DEVICE SEQUENCE AND HEALTH TRACKING
+    if (envelope.deviceId && summary.successful.length > 0) {
+      const currentDev = await DeviceService.getDevice(tenantId, envelope.deviceId);
+      const newSeq = (currentDev?.lastSyncedSequence || 0) + summary.successful.length;
+      DeviceService.updateDeviceSequence(tenantId, envelope.deviceId, {
+        syncedSequence: newSeq,
+        ackSequence: newSeq
+      });
+    }
+
     // 7. RECORD BATCH AUDIT SUMMARY
     await SyncAuditService.logEvent({
       tenantId,
