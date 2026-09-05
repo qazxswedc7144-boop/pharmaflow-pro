@@ -218,6 +218,8 @@ export class AliasMatchingEngine {
     let bestFuzzy: Product | null = null;
     let bestScore = 0;
     let bestSafety: DosageFormSafetyResult = { isSafe: true };
+    let secondFuzzy: Product | null = null;
+    let secondScore = 0;
 
     for (const p of products) {
       if (isProductRejected(p.id)) continue;
@@ -227,24 +229,49 @@ export class AliasMatchingEngine {
 
       if (score > bestScore) {
         const safety = validateSafety(p);
-        // Only accept candidate if dosage is safe or if score is high without critical collision
+        // Only accept candidate if dosage is safe
         if (safety.isSafe) {
+          secondScore = bestScore;
+          secondFuzzy = bestFuzzy;
           bestScore = score;
           bestFuzzy = p;
           bestSafety = safety;
         }
+      } else if (score > secondScore) {
+        const safety = validateSafety(p);
+        if (safety.isSafe) {
+          secondScore = score;
+          secondFuzzy = p;
+        }
       }
     }
 
-    if (bestFuzzy && bestScore >= 0.70) {
-      return {
-        productId: bestFuzzy.id,
-        productName: bestFuzzy.name || bestFuzzy.Name || '',
-        matchType: 'FUZZY',
-        confidence: Math.round(bestScore * 100) / 100,
-        isSupplierSpecific: false,
-        safetyCheck: bestSafety
-      };
+    // Check for ambiguous close candidates
+    const isClose = secondFuzzy !== null && secondScore >= 0.70 && (bestScore - secondScore) < 0.07;
+
+    if (bestFuzzy && bestScore >= 0.76) {
+      if (isClose) {
+        return {
+          productId: bestFuzzy.id,
+          productName: bestFuzzy.name || bestFuzzy.Name || '',
+          matchType: 'MANUAL_REVIEW',
+          confidence: Math.round(bestScore * 100) / 100,
+          isSupplierSpecific: false,
+          safetyCheck: {
+            isSafe: false,
+            reason: `مرشحان متقاربان يتطلبان مراجعة يدوية: (${bestFuzzy.name || bestFuzzy.Name}) و (${secondFuzzy!.name || secondFuzzy!.Name})`
+          }
+        };
+      } else if (bestScore >= 0.78) {
+        return {
+          productId: bestFuzzy.id,
+          productName: bestFuzzy.name || bestFuzzy.Name || '',
+          matchType: 'FUZZY',
+          confidence: Math.round(bestScore * 100) / 100,
+          isSupplierSpecific: false,
+          safetyCheck: bestSafety
+        };
+      }
     }
 
     return null;

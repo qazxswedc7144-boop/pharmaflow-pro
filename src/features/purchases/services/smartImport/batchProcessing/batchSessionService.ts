@@ -174,7 +174,7 @@ export class BatchSessionService {
     for (const sup of existingSuppliers) {
       const sName = sup.Supplier_Name || sup.name || '';
       const score = ProductMatchingEngine.calculateSimilarity(trimmed, sName);
-      if (score >= 0.50) {
+      if (score >= 0.45) {
         scoredSuppliers.push({
           id: sup.id || sup.Supplier_ID || '',
           name: sup.Supplier_Name || sup.name || '',
@@ -187,11 +187,12 @@ export class BatchSessionService {
 
     scoredSuppliers.sort((a, b) => b.score - a.score);
     const topCandidate = scoredSuppliers[0];
+    const secondCandidate = scoredSuppliers[1];
 
-    // High confidence match (>= 0.85) without ambiguity
-    if (topCandidate && topCandidate.score >= 0.85) {
-      const secondScore = scoredSuppliers[1]?.score ?? 0;
-      const isAmbiguous = scoredSuppliers.length > 1 && (topCandidate.score - secondScore) < 0.05;
+    // High confidence match (>= 0.90) without ambiguity (score difference >= 0.10)
+    if (topCandidate && topCandidate.score >= 0.90) {
+      const secondScore = secondCandidate?.score ?? 0;
+      const isAmbiguous = scoredSuppliers.length > 1 && (topCandidate.score - secondScore) < 0.10;
       
       if (isAmbiguous) {
         return {
@@ -200,7 +201,7 @@ export class BatchSessionService {
           confidence: topCandidate.score,
           action: SupplierResolutionAction.UNRESOLVED,
           suggestedSuppliers: scoredSuppliers.slice(0, 5),
-          reason: 'توجد أكثر من نتيجة متطابقة بدرجة متقاربة - يرجى الاختيار اليدوي'
+          reason: `توجد عدة أسماء موردين متقاربة (${topCandidate.name} و ${secondCandidate?.name}) - يحتاج مراجعة وتأكيد يدوي لمنع الخلط`
         };
       }
 
@@ -212,33 +213,38 @@ export class BatchSessionService {
         confidence: topCandidate.score,
         action: SupplierResolutionAction.LINK_EXISTING,
         suggestedSuppliers: scoredSuppliers.slice(0, 5),
-        reason: `تطابق عالي مع المورد (${topCandidate.name}) بنسبة ${Math.round(topCandidate.score * 100)}%`
+        reason: `تطابق عالي وموثوق مع المورد (${topCandidate.name}) بنسبة ${Math.round(topCandidate.score * 100)}%`
       };
     }
 
-    // Possible match (0.60 <= score < 0.85)
-    if (topCandidate && topCandidate.score >= 0.60) {
+    // Possible match or ambiguous match (0.55 <= score < 0.90) — NEVER auto-assign randomly
+    if (topCandidate && topCandidate.score >= 0.55) {
+      const secondScore = secondCandidate?.score ?? 0;
+      const isAmbiguous = scoredSuppliers.length > 1 && Math.abs(topCandidate.score - secondScore) <= 0.08;
+
       return {
         importedSupplierName: trimmed,
-        status: SupplierResolutionStatus.POSSIBLE_MATCH,
+        status: isAmbiguous ? SupplierResolutionStatus.AMBIGUOUS : SupplierResolutionStatus.POSSIBLE_MATCH,
         confidence: topCandidate.score,
         action: SupplierResolutionAction.UNRESOLVED,
         suggestedSuppliers: scoredSuppliers.slice(0, 5),
-        reason: 'اقتراحات مشابهة للمورد - تتطلب تأكيد المستخدم'
+        reason: isAmbiguous
+          ? `تشابه متقارب بين أكثر من مورد (${topCandidate.name} و ${secondCandidate?.name}) - يحتاج مراجعة`
+          : `مطابقة تقريبية مع المورد (${topCandidate.name}) بنسبة ${Math.round(topCandidate.score * 100)}% - يحتاج مراجعة وتأكيد`
       };
     }
 
-    // New Supplier Candidate
+    // New Supplier Candidate (< 0.55 or no close candidate)
     return {
       importedSupplierName: trimmed,
       status: SupplierResolutionStatus.NEW_SUPPLIER,
-      confidence: 0,
+      confidence: 0.40,
       action: SupplierResolutionAction.UNRESOLVED,
       suggestedSuppliers: scoredSuppliers.slice(0, 3),
       newSupplierData: {
         name: trimmed
       },
-      reason: 'مورد جديد غير مسجل مسبقاً'
+      reason: `المورد المستخرج "${trimmed}" غير مسجل في دليلك - يحتاج مراجعة لإضافته أو ربطه`
     };
   }
 

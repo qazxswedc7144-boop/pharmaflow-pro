@@ -17,26 +17,77 @@ export class ConfidenceEngine {
   public static readonly HIGH_THRESHOLD = 0.90;
   public static readonly MEDIUM_THRESHOLD = 0.70;
 
-  public static calculateSupplierConfidence(name?: string, isKnownMatch = false): FieldConfidence {
+  public static calculateSupplierConfidence(
+    name?: string, 
+    isKnownMatch = false,
+    status?: string,
+    customReason?: string
+  ): FieldConfidence {
     const reasons: string[] = [];
     if (!name || !name.trim()) {
       return {
         field: 'supplier',
-        score: 0.40,
+        score: 0.30,
         level: 'LOW',
-        reasons: ['المورد غير محدد في المستند'],
+        reasons: [customReason || 'المورد غير محدد في المستند ويحتاج مراجعة واختيار يدوي'],
         extractedValue: name
       };
     }
-    const score = isKnownMatch ? 0.95 : 0.80;
-    reasons.push(isKnownMatch ? `تطابق تام مع مورد مسجل: ${name}` : `اسم مورد مستخرج: ${name}`);
+
+    if (status === 'AMBIGUOUS') {
+      return {
+        field: 'supplier',
+        score: 0.55,
+        level: 'LOW',
+        reasons: [customReason || 'تشابه بين عدة موردين متقاربين — يحتاج مراجعة واختيار يدوي'],
+        extractedValue: name
+      };
+    }
+
+    if (status === 'POSSIBLE_MATCH') {
+      return {
+        field: 'supplier',
+        score: 0.65,
+        level: 'MEDIUM',
+        reasons: [customReason || 'مطابقة تقريبية للمورد — يحتاج مراجعة وتأكيد المستخدم'],
+        extractedValue: name
+      };
+    }
+
+    if (isKnownMatch || status === 'EXACT_MATCH') {
+      const score = 0.98;
+      reasons.push(customReason || `تطابق تام مع مورد مسجل في النظام: ${name}`);
+      return {
+        field: 'supplier',
+        score,
+        level: 'HIGH',
+        reasons,
+        extractedValue: name,
+        resolvedValue: name
+      };
+    }
+
+    if (status === 'HIGH_CONFIDENCE_MATCH') {
+      const score = 0.90;
+      reasons.push(customReason || `مطابقة موثوقة مع المورد: ${name}`);
+      return {
+        field: 'supplier',
+        score,
+        level: 'HIGH',
+        reasons,
+        extractedValue: name,
+        resolvedValue: name
+      };
+    }
+
+    const score = 0.45;
+    reasons.push(customReason || `اسم مورد مستخرج غير مسجل في دليلك: ${name} (يحتاج مراجعة)`);
     return {
       field: 'supplier',
       score,
-      level: this.getLevel(score),
+      level: 'LOW',
       reasons,
-      extractedValue: name,
-      resolvedValue: name
+      extractedValue: name
     };
   }
 

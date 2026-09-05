@@ -185,9 +185,12 @@ export interface ExtractedImportRow {
   // Intelligence & Matching
   matchedProductId?: string;
   matchedProductName?: string;
-  matchType?: 'EXACT' | 'NORMALIZED' | 'BARCODE' | 'CODE' | 'ALIAS' | 'FUZZY' | 'NONE';
+  matchType?: 'EXACT' | 'NORMALIZED' | 'BARCODE' | 'CODE' | 'ALIAS' | 'FUZZY' | 'MANUAL_REVIEW' | 'NONE';
   matchScore?: number;
   isNewProductCandidate?: boolean;
+  needsReview?: boolean;
+  reviewReason?: string;
+  candidateAlternatives?: Array<{ productId: string; productName: string; score: number }>;
   
   // Validation
   status: RowValidationStatus;

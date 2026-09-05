@@ -459,4 +459,58 @@ export class ExtractionCacheService {
   private static normalizeScope(value?: string): string {
     return (value || 'DEFAULT').trim();
   }
+
+  /**
+   * Compatibility wrapper for direct tenant/branch/hash cache writes
+   */
+  public static async set(
+    tenantId: string,
+    hash: string,
+    data: any,
+    confidence: number = 1.0,
+    branchId?: string,
+    ttlMs?: number
+  ): Promise<void> {
+    const cacheKey = `hash:${this.normalizeScope(tenantId)}:${this.normalizeScope(branchId)}:${hash}`;
+    const now = Date.now();
+    const ttl = ttlMs || this.DEFAULT_TTL_MS;
+    const sizeBytes = 1024;
+
+    this.cache.set(cacheKey, {
+      document: (data && typeof data === 'object' ? JSON.parse(JSON.stringify(data)) : data) as any,
+      providerName: 'DIRECT_SET',
+      confidence,
+      createdAt: now,
+      cacheKey,
+      lastAccessedAt: now,
+      sizeBytes,
+      expiresAt: now + ttl,
+      tenantId: this.normalizeScope(tenantId),
+      branchId: this.normalizeScope(branchId)
+    });
+  }
+
+  /**
+   * Compatibility wrapper for direct tenant/branch/hash cache reads
+   */
+  public static async get(
+    tenantId: string,
+    hash: string,
+    branchId?: string
+  ): Promise<any | null> {
+    const cacheKey = `hash:${this.normalizeScope(tenantId)}:${this.normalizeScope(branchId)}:${hash}`;
+    const entry = this.cache.get(cacheKey);
+    if (!entry) return null;
+    if (this.isExpired(entry)) {
+      this.cache.delete(cacheKey);
+      return null;
+    }
+    const doc = entry.document;
+    return {
+      ...(doc && typeof doc === 'object' ? doc : {}),
+      data: doc,
+      document: doc,
+      confidence: entry.confidence
+    };
+  }
 }
