@@ -15,7 +15,6 @@ import {
 import { BatchProcessingOrchestrator } from '../../services/smartImport/batchProcessing/batchProcessingOrchestrator';
 import { ImportAnalysisResult, ExtractedImportRow } from '../../services/smartImport/types';
 import { Product, Supplier } from '@/types';
-import { SmartImportSupplierResolution } from './SmartImportSupplierResolution';
 import { SmartImportBatchSummary, ProductFilterTab } from './SmartImportBatchSummary';
 import { SmartImportBulkActions } from './SmartImportBulkActions';
 import { SmartImportProductResolution } from './SmartImportProductResolution';
@@ -23,7 +22,6 @@ import {
   Sparkles,
   CheckCircle2,
   AlertTriangle,
-  X,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
@@ -81,11 +79,11 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
   analysisResult,
   isLoading,
   progressPercent = 50,
-  progressMessage = 'جاري تحليل ومعالجة المستند...',
+  progressMessage: _progressMessage = 'جاري تحليل ومعالجة المستند...',
   onApply,
   onApplyAndSaveImmediately,
   availableProducts = [],
-  availableSuppliers = []
+  availableSuppliers: _availableSuppliers = []
 }) => {
   const [session, setSession] = useState<BatchProcessingSession | null>(null);
   const [activeFilterTab, setActiveFilterTab] = useState<ProductFilterTab>('ALL');
@@ -185,12 +183,15 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
     setSelectedRowIds(newSet);
   };
 
-  const handleUpdateSupplier = (update: Partial<SupplierDecision>) => {
+  const _handleUpdateSupplier = (update: Partial<SupplierDecision>) => {
     if (!session) return;
     const updatedSession = BatchProcessingOrchestrator.updateSupplier(session, update);
     setSession(updatedSession);
     setValidationErrorMsg(null);
   };
+  void _handleUpdateSupplier;
+  void _availableSuppliers;
+  void _progressMessage;
 
   const handleUpdateProduct = (sourceRowId: number, update: Partial<ProductDecision>) => {
     if (!session) return;
@@ -269,7 +270,7 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
           bonusQty: item.bonusQty,
           notes: item.notes,
           status: 'VALID',
-          confidenceScore: 1.0,
+          matchScore: 1.0,
           validationIssues: []
         };
 
@@ -325,15 +326,23 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
       isOpen={isOpen}
       onClose={handleCancel}
       title=""
-      maxWidth="max-w-[880px] w-full sm:w-[95vw]"
+      maxWidth={isLoading ? "max-w-md w-full sm:w-[90vw]" : "max-w-[880px] w-full sm:w-[95vw]"}
       noPadding={true}
+      positionClass={isLoading ? "items-center" : "items-end sm:items-center"}
       centerOnMobile={true}
       showCloseButton={false}
     >
-      <div dir="rtl" className="flex flex-col h-[96dvh] sm:h-[90vh] max-h-[96dvh] bg-white rounded-2xl sm:rounded-3xl overflow-hidden font-cairo select-none">
+      <div 
+        dir="rtl" 
+        className={`flex flex-col bg-white rounded-2xl sm:rounded-3xl overflow-hidden font-cairo select-none ${
+          isLoading
+            ? 'min-h-[300px] h-auto max-h-[48vh] my-auto'
+            : 'h-[96dvh] sm:h-[90vh] max-h-[96dvh]'
+        }`}
+      >
 
         {/* Compact header: title + source chip (smaller, single-row) */}
-        <div className="bg-[#1E4D4D] text-white px-3 py-2 flex items-center justify-between gap-2 shadow-xs">
+        <div className="bg-[#1E4D4D] text-white px-3 py-2 flex items-center justify-between gap-2 shadow-xs shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-emerald-300 shrink-0">
               <Sparkles size={16} />
@@ -348,22 +357,49 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-emerald-100/80 font-medium truncate max-w-[260px]">راجع البيانات واتخذ القرار قبل إضافة الأصناف إلى الفاتورة</p>
+              <p className="text-[11px] text-emerald-100/80 font-medium truncate max-w-[260px]">
+                راجع البيانات واتخذ القرار قبل إضافة الأصناف إلى الفاتورة
+              </p>
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2">
+        {/* LOADING STATE */}
+        {isLoading && (
+          <div className="flex-1 p-6 flex flex-col items-center justify-center space-y-4 my-auto">
+            <div className="relative w-14 h-14">
+              <div className="absolute inset-0 rounded-full border-4 border-emerald-100 animate-ping opacity-30" />
+              <div className="w-14 h-14 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin flex items-center justify-center">
+                <Sparkles className="text-emerald-600 animate-pulse" size={20} />
+              </div>
+            </div>
+
+            <div className="text-center space-y-1.5 max-w-sm px-2">
+              <h3 className="text-xs sm:text-sm font-black text-[#1E4D4D] leading-relaxed">
+                جاري تشغيل محرك OCR المحلي للتعرف على محتويات المستند...
+              </h3>
+              <p className="text-[11px] sm:text-xs font-bold text-slate-500 leading-normal">
+                جاري فحص سلامة المستند، مطابقة الأصناف والمورد....
+              </p>
+            </div>
+
+            <div className="w-full max-w-xs bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div 
+                className="bg-emerald-600 h-full rounded-full transition-all duration-300"
+                style={{ width: `${Math.min(100, Math.max(15, progressPercent))}%` }}
+              />
+            </div>
+
             <button
-              id="btn-close-processing-center"
+              id="btn-abort-smart-import"
+              type="button"
               onClick={handleCancel}
-              className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95"
-              title="إغلاق"
-              aria-label="إغلاق"
+              className="mt-1 px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all active:scale-95"
             >
-              <X size={16} />
+              إلغاء المعالجة
             </button>
           </div>
-        </div>
+        )}
 
         {/* Invoice meta row (compact) */}
         {!isLoading && session && (
@@ -380,7 +416,12 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
 
             <div className="ml-auto flex items-center gap-2">
               <div className="text-[13px] font-bold">المورد:</div>
-              <div className="text-[13px] text-slate-700 truncate max-w-[160px]">{session.summary.detectedSupplier || session.supplierDecision?.name || 'غير مكتشف'}</div>
+              <div className="text-[13px] text-slate-700 truncate max-w-[160px]">
+                {session.summary.detectedSupplier ||
+                  session.supplierDecision?.matchedSupplierName ||
+                  session.supplierDecision?.importedSupplierName ||
+                  'غير مكتشف'}
+              </div>
             </div>
           </div>
         )}
@@ -484,13 +525,6 @@ export const SmartImportProcessingCenter: React.FC<SmartImportProcessingCenterPr
             >
               إلغاء
             </button>
-          </div>
-        )}
-
-        {/* Loading fallback (if modal open but no session) */}
-        {isLoading && (
-          <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-center">
-            <div className="text-sm text-slate-600">{progressMessage}</div>
           </div>
         )}
 
